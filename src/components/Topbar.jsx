@@ -1,10 +1,10 @@
 import React from 'react'
 import { Icon } from '../icons'
-import { categories, allTools } from '../toolsData'
-import { isLightTheme } from '../themes'
+import { allTools, categories } from '../toolsData'
 
-export function Topbar({ currentView, onNavigate, onOpenSearch, theme, onToggleTheme, sidebarCollapsed, onToggleSidebar }) {
-  const isLight = isLightTheme(theme)
+export function Topbar({ currentView, onNavigate, onOpenSearch }) {
+  const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
+  const isHome = currentView.type === 'home'
   // Build breadcrumb items based on current view
   const renderBreadcrumbs = () => {
     if (currentView.type === 'home') {
@@ -87,15 +87,6 @@ export function Topbar({ currentView, onNavigate, onOpenSearch, theme, onToggleT
   return (
     <header className="topbar">
       <div className="topbar-leading">
-        <button
-          className="icon-button sidebar-toggle"
-          type="button"
-          onClick={onToggleSidebar}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <Icon name="sidebar" size={18} />
-        </button>
         <div className="breadcrumbs">{renderBreadcrumbs()}</div>
       </div>
 
@@ -104,24 +95,13 @@ export function Topbar({ currentView, onNavigate, onOpenSearch, theme, onToggleT
           className="search-box"
           type="button"
           onClick={onOpenSearch}
-          aria-label="Search tools (Command K)"
+          aria-label={`Open command palette (${isMac ? 'Command' : 'Ctrl'} K)`}
         >
           <Icon name="search" size={16} />
-          <span>Search tools</span>
-          <kbd>⌘ K</kbd>
+          <span>Command palette</span>
+          <kbd>{isMac ? '⌘ + K' : 'Ctrl + K'}</kbd>
         </button>
 
-        <div className="topbar-divider" />
-
-        <button
-          className="top-avatar-btn"
-          type="button"
-          onClick={() => onNavigate({ type: 'settings' })}
-          title="Workspace Settings"
-          aria-label="Open Workspace Settings"
-        >
-          <div className="top-avatar">K</div>
-        </button>
       </div>
     </header>
   )

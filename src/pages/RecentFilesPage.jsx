@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Icon } from '../icons'
+import { Presence } from '../components/Presence'
 
 const formatBytes = (size) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(2)} MB`
 const relativeDate = (value) => {
@@ -13,19 +14,28 @@ const relativeDate = (value) => {
 }
 
 function ConfirmDialog({ isOpen, onClose, fileName, onDelete }) {
-  if (!isOpen) return null
+  const acceptButton = useRef(null)
+  useEffect(() => { if (isOpen) acceptButton.current?.focus() }, [isOpen])
   return (
-    <div className="confirm-backdrop" onClick={onClose}>
-      <div className="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="remove-dialog-title" onClick={(e) => e.stopPropagation()}>
+    <Presence present={isOpen} exitDuration={180}><div className="confirm-backdrop" onClick={onClose}>
+      <div className="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="remove-dialog-title" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() }
+        if (event.key === 'Enter' && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); event.stopPropagation(); if (!event.repeat) onDelete() }
+        if (event.key === 'Tab') {
+          const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled)')]
+          if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus() }
+          else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus() }
+        }
+      }}>
         <div className="confirm-icon"><Icon name="trash" size={21} /></div>
         <h2 className="confirm-title" id="remove-dialog-title">Remove from library?</h2>
         <p className="confirm-message">Remove <strong>{fileName}</strong> from your library? It will be deleted from the app cache but stay on your computer.</p>
         <div className="confirm-actions">
           <button type="button" className="confirm-btn confirm-btn-cancel" onClick={onClose}><Icon name="x" size={14} /> Cancel</button>
-          <button type="button" className="confirm-btn confirm-btn-delete" onClick={onDelete}><Icon name="trash" size={14} /> Remove</button>
+          <button ref={acceptButton} autoFocus type="button" className="confirm-btn confirm-btn-delete" onClick={onDelete}><Icon name="trash" size={14} /> Remove</button>
         </div>
       </div>
-    </div>
+    </div></Presence>
   )
 }
 
@@ -45,7 +55,7 @@ export function RecentFilesPage({ onNavigate }) {
     try {
       const data = await window.pdfKing?.readRecentFile(record.id)
       if (!data) throw new Error('Recent file storage is only available in the desktop app.')
-      const file = new File([data], record.name, { type: 'application/pdf' })
+      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath=record.sourcePath
       onNavigate({ type: 'tool', toolId: 'pdf-editor', files: [file] })
     } catch (cause) { setError(cause.message || 'Could not open this recent PDF.') }
   }
@@ -79,7 +89,7 @@ export function RecentFilesPage({ onNavigate }) {
       {files.length === 0 ? (
         <div className="recent-empty-state"><div className="empty-icon-wrap"><Icon name="pages" size={32} /></div><h3>No recent documents yet</h3><p>PDF files you open or export in the desktop app will appear here.</p><button className="browse-button" type="button" onClick={() => onNavigate({ type: 'home' })}>Back to Home <Icon name="arrow" size={15} /></button></div>
       ) : (
-        <div className="recent-files-list">{files.map((file) => <div key={file.id} data-pdf-id={file.id} data-pdf-name={file.name} className="recent-file-card clickable" onClick={() => open(file)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(file) } }}>
+        <div className="recent-files-list">{files.map((file) => <div key={file.id} data-pdf-id={file.id} data-pdf-name={file.name} className="recent-file-card clickable" onClick={() => open(file)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.target.closest('button, a, input, textarea, select')) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(file) } }}>
           <button type="button" className="delete-card-btn" onClick={(event) => { event.stopPropagation(); showDeleteConfirm(file) }} aria-label={`Remove ${file.name} from library`}>
             <Icon name="trash" size={14} />
           </button>

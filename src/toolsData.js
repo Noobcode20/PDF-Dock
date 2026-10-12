@@ -1,8 +1,8 @@
 export const categories = [
-  { id: 'edit', label: 'Edit & annotate', icon: 'edit', count: 7, description: 'Annotate, mark up, sign, add watermarks, and fill interactive PDF forms.' },
-  { id: 'organize', label: 'Organize', icon: 'pages', count: 8, description: 'Merge, split, rotate, reorder, extract, and remove pages cleanly.' },
-  { id: 'convert', label: 'Convert', icon: 'convert', count: 7, description: 'Transform documents between PDF and Word, Excel, JPG, and searchable text.' },
-  { id: 'secure', label: 'Secure & optimize', icon: 'shield', count: 5, description: 'Shrink document size, encrypt with passwords, unlock, and redact sensitive info.' },
+  { id: 'edit', label: 'Edit & annotate', icon: 'edit', description: 'Add text, sign, add watermarks, and fill supported interactive PDF forms.' },
+  { id: 'organize', label: 'Organize', icon: 'pages', description: 'Merge, split, rotate, reorder, extract, and remove pages cleanly.' },
+  { id: 'convert', label: 'Convert', icon: 'convert', description: 'Convert between PDF, Word, PowerPoint, images, and text.' },
+  { id: 'secure', label: 'Secure & optimize', icon: 'shield', description: 'Optimize, encrypt, unlock with a password, and redact PDFs.' },
 ]
 
 export const allTools = [
@@ -38,12 +38,12 @@ export const allTools = [
     name: 'Compress PDF',
     category: 'secure',
     categoryLabel: 'Secure & optimize',
-    description: 'Optimize losslessly or recompress pages as images',
+    description: 'Reduce PDF size with adaptive compression',
     icon: 'compress',
     tone: 'green',
     popular: true,
     actionName: 'Compress PDF',
-    tip: 'Choose lossless optimization to preserve content, or lossy raster compression for stronger reduction.',
+    tip: 'Target 70% smaller while preserving selectable text, links, and forms. Actual savings depend on the file; see the compressed size before saving.',
     kind: 'compress'
   },
   {
@@ -144,12 +144,12 @@ export const allTools = [
     name: 'Edit bookmarks',
     category: 'edit',
     categoryLabel: 'Edit & annotate',
-    description: 'Update document navigation, outline, and table of contents',
+    description: 'Replace the document outline with a flat list of page bookmarks',
     icon: 'star',
     tone: 'blue',
     popular: false,
     actionName: 'Save Bookmarks',
-    tip: 'Create clean hierarchical chapter indexes for long documents.',
+    tip: 'Create a flat, top-level outline from page and title pairs.',
     kind: 'bookmarks'
   },
   {
@@ -170,7 +170,7 @@ export const allTools = [
     name: 'Add watermark',
     category: 'edit',
     categoryLabel: 'Edit & annotate',
-    description: 'Stamp custom confidential text or image onto pages',
+    description: 'Stamp custom text onto selected pages',
     icon: 'pen',
     tone: 'rose',
     popular: false,
@@ -183,7 +183,7 @@ export const allTools = [
     name: 'Fill forms',
     category: 'edit',
     categoryLabel: 'Edit & annotate',
-    description: 'Complete PDF form fields, checkboxes, and signatures',
+    description: 'Complete supported text, checkbox, and choice fields in a PDF form',
     icon: 'edit',
     tone: 'green',
     popular: false,
@@ -226,12 +226,12 @@ export const allTools = [
     name: 'OCR PDF',
     category: 'convert',
     categoryLabel: 'Convert',
-    description: 'Read scanned PDF pages and export recognized text',
+    description: 'Add a searchable text layer to scanned PDF pages',
     icon: 'search',
     tone: 'blue',
     popular: false,
-    actionName: 'Recognize text',
-    tip: 'Recognize text from scanned pages on this device and save it as a plain-text file.',
+    actionName: 'Make searchable',
+    tip: 'Recognize scanned text on this device and place it invisibly over the original pages so the PDF remains visually unchanged and searchable.',
     kind: 'convert'
   },
   {
@@ -240,7 +240,7 @@ export const allTools = [
     category: 'convert',
     categoryLabel: 'Convert',
     description: 'Convert PDF text into editable Word paragraphs with basic formatting',
-    icon: 'convert',
+    icon: 'fileText',
     tone: 'blue',
     popular: false,
     actionName: 'Convert to Word',
@@ -252,12 +252,12 @@ export const allTools = [
     name: 'Word to PDF',
     category: 'convert',
     categoryLabel: 'Convert',
-    description: 'Export text from a DOCX document to a basic PDF',
-    icon: 'convert',
+    description: 'Convert DOCX text and basic formatting, alignment, and table column widths to PDF',
+    icon: 'fileDown',
     tone: 'lilac',
     popular: false,
     actionName: 'Convert to PDF',
-    tip: 'Basic text-only output; original layout, images, and advanced styling may change.',
+    tip: 'Text alignment and table column proportions are retained. Exact fonts, images, and complex layouts may differ.',
     kind: 'convert'
   },
   {
@@ -266,7 +266,7 @@ export const allTools = [
     category: 'convert',
     categoryLabel: 'Convert',
     description: 'Extract every page as a high-resolution JPG or PNG image',
-    icon: 'convert',
+    icon: 'image',
     tone: 'green',
     popular: false,
     actionName: 'Extract Images',
@@ -279,7 +279,7 @@ export const allTools = [
     category: 'convert',
     categoryLabel: 'Convert',
     description: 'Convert photos and image scans into a tidy unified PDF',
-    icon: 'convert',
+    icon: 'imageFile',
     tone: 'amber',
     popular: false,
     actionName: 'Create PDF',
@@ -287,29 +287,29 @@ export const allTools = [
     kind: 'convert'
   },
   {
-    id: 'pdf-to-excel',
-    name: 'PDF to Excel',
+    id: 'pdf-to-pptx',
+    name: 'PDF to PowerPoint',
     category: 'convert',
     categoryLabel: 'Convert',
-    description: 'Export PDF text to Excel, using OCR on scanned pages',
-    icon: 'convert',
-    tone: 'green',
+    description: 'Turn each PDF page into a PowerPoint slide',
+    icon: 'fileText',
+    tone: 'lilac',
     popular: false,
-    actionName: 'Convert to Excel',
-    tip: 'Scanned pages are read with OCR; complex table structure is not reconstructed.',
+    actionName: 'Convert to PowerPoint',
+    tip: 'PDF text is placed in editable PowerPoint text boxes. Illustrations and complex vector artwork remain in the page background.',
     kind: 'convert'
   },
   {
-    id: 'excel-to-pdf',
-    name: 'Excel to PDF',
+    id: 'powerpoint-to-pdf',
+    name: 'PowerPoint to PDF',
     category: 'convert',
     categoryLabel: 'Convert',
-    description: 'Export Excel (.xlsx) or CSV cell values to a basic PDF',
-    icon: 'convert',
+    description: 'Export PowerPoint slides to a PDF document',
+    icon: 'fileDown',
     tone: 'blue',
     popular: false,
     actionName: 'Export to PDF',
-    tip: 'Text-only output; styling, formulas, charts, and print settings are not preserved.',
+    tip: 'PPTX files are rendered locally. Legacy PPT files must be saved as PPTX first.',
     kind: 'convert'
   },
 
@@ -332,7 +332,7 @@ export const allTools = [
     name: 'Unlock PDF',
     category: 'secure',
     categoryLabel: 'Secure & optimize',
-    description: 'Password removal is not available in this build',
+    description: 'Remove encryption using the document password',
     icon: 'unlock',
     tone: 'amber',
     popular: false,
@@ -367,3 +367,7 @@ export const allTools = [
     kind: 'repair'
   }
 ]
+
+for (const category of categories) {
+  category.count = allTools.filter((tool) => tool.category === category.id).length
+}

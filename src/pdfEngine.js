@@ -1,19 +1,34 @@
-import { PDFDocument, PDFHexString, PDFName, StandardFonts, rgb, degrees } from 'pdf-lib'
+import { resolveFontFamilyStack } from "./editor/fonts.js"
+import { extractTextColorStyles } from './editor/pdfTextColors.js'
+import { abortable } from './editor/cancellation'
+import { detectTextFormCandidates } from './editor/formDetection'
+import { addOcrWords } from './editor/ocrTextLayer'
+import { commitOperations, fontAssets } from './editor/commit'
+import { displayFrame, pdfRect, reframeRegion } from './editor/coordinates'
+import { PDFDocument, PDFHexString, PDFName, StandardFonts, rgb, degrees, pushGraphicsState, popGraphicsState, concatTransformationMatrix } from 'pdf-lib'
+import 'regenerator-runtime/runtime'
 import './mapCompat'
 import * as pdfjs from 'pdfjs-dist'
 import pdfWorkerUrl from './pdfWorkerCompat.js?worker&url'
 import qpdfWasmUrl from 'pdfstudio/qpdf.wasm?url'
+import { compressPdfBytes, optimizePdfDocument, optimizePdfType1Fonts, recompressPdfImages } from './pdfCompression'
 
 // This module intentionally owns no UI state or filesystem access. All inputs and
 // outputs are in-memory browser File/Uint8Array values so it can run in a renderer.
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+const pdfImageWasmUrl = new URL('./pdfjs/wasm/', document.baseURI).href
 
 
 const PDF_MIME = 'application/pdf'
 const JPG_MIME = 'image/jpeg'
-const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
 let qpdfToolkitPromise
+async function textFont(doc, text, standard = StandardFonts.Helvetica) {
+  const {resolveFont} = await import('./editor/fonts')
+  const style = {fontFamily:standard, bold:/Bold/i.test(standard), italic:/Italic|Oblique/i.test(standard)}
+  try {return await resolveFont(doc,text,style)} catch {return resolveFont(doc,text,style,await fontAssets())}
+}
 
 async function getQpdfToolkit() {
   if (!qpdfToolkitPromise) {
@@ -39,7 +54,7 @@ const TOOL_NAMES = {
   'crop-pdf': 'Crop PDF', 'add-watermark': 'Add watermark', 'page-numbers': 'Page numbers',
   'flatten-pdf': 'Flatten PDF', 'repair-pdf': 'Repair PDF', 'pdf-to-jpg': 'PDF to JPG',
   'jpg-to-pdf': 'JPG to PDF', 'pdf-to-word': 'PDF to Word', 'word-to-pdf': 'Word to PDF',
-  'pdf-to-excel': 'PDF to Excel', 'excel-to-pdf': 'Excel to PDF', 'compress-pdf': 'Compress PDF',
+  'pdf-to-pptx': 'PDF to PowerPoint', 'powerpoint-to-pdf': 'PowerPoint to PDF', 'compress-pdf': 'Compress PDF',
   'redact-pdf': 'Redact PDF', 'ocr-pdf': 'OCR PDF',
 }
 
@@ -53,6 +68,7 @@ function asBytes(data) {
 
 async function readFile(file) {
   if (!file || typeof file.arrayBuffer !== 'function') fail('Choose a file before starting this operation.')
+  if (Number(file.size) > 512 * 1024 * 1024) fail('This file is larger than the 512 MB processing limit. Split it into smaller files and try again.')
   return new Uint8Array(await file.arrayBuffer())
 }
 
@@ -62,6 +78,34 @@ function output(name, data, mimeType = PDF_MIME) {
 
 function baseName(file) {
   return (file?.name || 'document').replace(/\.[^.]+$/, '')
+}
+
+function wrapTextToWidth(text, font, fontSize, maxWidth) {
+  const outputLines = []
+  for (const sourceLine of String(text).split(/\r?\n/)) {
+    const words = sourceLine.trim().split(/\s+/).filter(Boolean)
+    if (!words.length) { outputLines.push(''); continue }
+    const splitWord = (word) => {
+      if (font.widthOfTextAtSize(word, fontSize) <= maxWidth) return [word]
+      const pieces = []
+      let piece = ''
+      for (const character of word) {
+        if (piece && font.widthOfTextAtSize(piece + character, fontSize) > maxWidth) { pieces.push(piece); piece = character }
+        else piece += character
+      }
+      if (piece) pieces.push(piece)
+      return pieces
+    }
+    const expandedWords = words.flatMap(splitWord)
+    let line = expandedWords.shift()
+    for (const word of expandedWords) {
+      const candidate = `${line} ${word}`
+      if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) line = candidate
+      else { outputLines.push(line); line = word }
+    }
+    outputLines.push(line)
+  }
+  return outputLines
 }
 
 function progress(onProgress, value, message) {
@@ -171,17 +215,91 @@ async function extractGroups(file, options, onProgress) {
   return outputs
 }
 
+const pdfJsDocumentCache = new WeakMap()
+const pdfJsLoadingTasks = new WeakMap()
+const pdfCanvasRenderTasks = new WeakMap()
+const pdfCanvasRenderVersions = new WeakMap()
+const pdfCanvasQueuedJobs = new WeakMap()
+const pdfTextLayerTasks = new WeakMap()
+const pdfTextLayerMetadata = new WeakMap()
+const pdfTextLayerVersions = new WeakMap()
+const pdfTextPageCache = new WeakMap()
+const pdfSearchTextCache = new WeakMap()
+const pdfSearchResultCache = new WeakMap()
+const pdfOutlineCache = new WeakMap()
+const pdfLinkCache = new WeakMap()
+const pdfFormWidgetCache = new WeakMap()
+const canvasRenderQueue = []
+let canvasRenderSequence = 0
+let activeCanvasRenders = 0
+const MAX_ACTIVE_CANVAS_RENDERS = 2
+
+function pumpCanvasRenderQueue() {
+  while (activeCanvasRenders < MAX_ACTIVE_CANVAS_RENDERS && canvasRenderQueue.length) {
+    canvasRenderQueue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
+    const job = canvasRenderQueue.shift()
+    if (job.cancelled) continue
+    activeCanvasRenders += 1
+    job.started = true
+    Promise.resolve().then(job.run).then(job.resolve, job.reject).finally(() => {
+      activeCanvasRenders = Math.max(0, activeCanvasRenders - 1)
+      if (pdfCanvasQueuedJobs.get(job.canvas) === job) pdfCanvasQueuedJobs.delete(job.canvas)
+      pumpCanvasRenderQueue()
+    })
+  }
+}
+
+function cancelQueuedCanvasJob(canvas) {
+  const queued = canvas && pdfCanvasQueuedJobs.get(canvas)
+  if (!queued || queued.started) return
+  queued.cancelled = true
+  pdfCanvasQueuedJobs.delete(canvas)
+  const index = canvasRenderQueue.indexOf(queued)
+  if (index >= 0) canvasRenderQueue.splice(index, 1)
+  queued.resolve({ status: 'CANCELLED', cancelled: true })
+}
+
+function enqueueCanvasRender(canvas, priority, run) {
+  cancelQueuedCanvasJob(canvas)
+  return new Promise((resolve, reject) => {
+    const job = { canvas, priority: Number(priority) || 0, sequence: canvasRenderSequence++, run, resolve, reject, cancelled: false, started: false }
+    pdfCanvasQueuedJobs.set(canvas, job)
+    canvasRenderQueue.push(job)
+    pumpCanvasRenderQueue()
+  })
+}
+
 async function getPdfJsDocument(fileOrBytes) {
   try {
+    if (!(fileOrBytes instanceof Uint8Array) && fileOrBytes && typeof fileOrBytes === 'object') {
+      const cached = pdfJsDocumentCache.get(fileOrBytes)
+      if (cached) return await cached
+      const pending = readFile(fileOrBytes).then((data) => {
+        const task = pdfjs.getDocument({ data: data.slice(), fontExtraProperties: true, wasmUrl: pdfImageWasmUrl })
+        task.onPassword = (update,reason) => { window.dispatchEvent(new CustomEvent('pdfking-password',{detail:{incorrect:reason===pdfjs.PasswordResponses.INCORRECT_PASSWORD,resolve:password=>{if(password===null)void task.destroy();else{fileOrBytes.pdfPassword=password;update(password)}}}})) }
+        pdfJsLoadingTasks.set(fileOrBytes, task)
+        return task.promise
+      }).catch((error) => { pdfJsDocumentCache.delete(fileOrBytes); pdfJsLoadingTasks.delete(fileOrBytes); throw error })
+      pdfJsDocumentCache.set(fileOrBytes, pending)
+      return await pending
+    }
     const data = fileOrBytes instanceof Uint8Array ? fileOrBytes : await readFile(fileOrBytes)
-    const task = pdfjs.getDocument({ data: data.slice() })
+    const task = pdfjs.getDocument({ data: data.slice(), fontExtraProperties: true, wasmUrl: pdfImageWasmUrl })
     return await task.promise
   } catch (error) { throw pdfError(error, 'read this PDF') }
+}
+
+export function disposePdfFile(file) {
+  const task = pdfJsLoadingTasks.get(file)
+  pdfJsLoadingTasks.delete(file)
+  pdfJsDocumentCache.delete(file)
+  if (task) void task.destroy().catch(() => {})
 }
 
 async function renderPage(doc, pageNumber, scale = 1.5) {
   const page = await doc.getPage(pageNumber)
   const viewport = page.getViewport({ scale })
+  if (viewport.width * viewport.height > 80_000_000) fail('This page exceeds the 80 megapixel rendering limit. Reduce the output DPI and try again.')
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.ceil(viewport.width))
   canvas.height = Math.max(1, Math.ceil(viewport.height))
@@ -205,20 +323,66 @@ async function pageToImage(pdfJsDoc, pageNumber, options = {}) {
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+function canvasPngDataUrl(canvas) {
+  return canvas.toDataURL('image/png')
+}
+
+function samplePageBackground(pixels, canvasWidth, canvasHeight, x, y, width, height, scale) {
+  const points = [
+    [x - 2, y - 2], [x + width / 2, y - 2], [x + width + 2, y - 2],
+    [x - 2, y + height + 2], [x + width / 2, y + height + 2], [x + width + 2, y + height + 2],
+    [x - 2, y + height / 2], [x + width + 2, y + height / 2],
+  ]
+  const colors = []
+  for (const [pointX, pointY] of points) {
+    const px = Math.max(0, Math.min(canvasWidth - 1, Math.round(pointX * scale)))
+    const py = Math.max(0, Math.min(canvasHeight - 1, Math.round(pointY * scale)))
+    const offset = (py * canvasWidth + px) * 4
+    colors.push([pixels.data[offset], pixels.data[offset + 1], pixels.data[offset + 2]])
+  }
+  const channels = [0, 1, 2].map((channel) => {
+    const values = colors.map((color) => color[channel]).sort((a, b) => a - b)
+    return { median: values[Math.floor(values.length / 2)], spread: values.at(-1) - values[0] }
+  })
+  if (channels.some((channel) => channel.spread > 28)) return null
+  return `#${channels.map(({ median }) => median.toString(16).padStart(2, '0')).join('')}`
+}
+
+function pptxFontFace(font, style) {
+  const raw = String(font?.name || style?.fontFamily || 'Arial').replace(/^[A-Z0-9]{6}\+/, '').trim()
+  if (!raw || /^(?:g_[a-z\d_]+|sans-serif|serif|monospace)$/i.test(raw)) return 'Arial'
+  const aliases = { ArialMT: 'Arial', Helvetica: 'Arial', Times: 'Times New Roman', TimesNewRomanPSMT: 'Times New Roman', Courier: 'Courier New', CourierNewPSMT: 'Courier New' }
+  return aliases[raw] || raw.replace(/[-_](?:regular|roman|bolditalic|boldoblique|bold|italic|oblique|medium)$/i, '')
+}
+
+function pdfTextStyle(item, style, font) {
+  const fontNames = `${font?.name || ''} ${font?.fallbackName || ''} ${style?.fontFamily || ''}`
+  const weight = Number(style?.fontWeight || font?.cssFontInfo?.fontWeight)
+  return {
+    fontFace: pptxFontFace(font, style),
+    bold: Boolean(font?.bold || font?.black || (Number.isFinite(weight) && weight >= 600) || /bold|black|heavy|demi|semibold/i.test(fontNames)),
+    italic: Boolean(font?.italic || /italic|oblique|slanted/i.test(fontNames)),
+  }
+}
+
 async function rasterPdf(file, options, onProgress, redactions = null) {
   const doc = await getPdfJsDocument(file)
   const outputPdf = await PDFDocument.create()
   const dpi = Math.max(96, Math.min(300, Number(options.dpi) || (redactions ? 200 : 144)))
   const quality = Math.max(0.25, Math.min(1, Number(options.quality) || 0.8))
   const list = redactions || []
+  const sourcePdf = redactions ? (await loadPdf(file)).pdf : null
   for (let n = 1; n <= doc.numPages; n += 1) {
+    if (redactions && !list.some(rect => Number(rect.page) === n)) { const [copy] = await outputPdf.copyPages(sourcePdf, [n-1]); outputPdf.addPage(copy); continue }
     const { canvas, viewport } = await renderPage(doc, n, dpi / 72)
     if (redactions) {
-      // Masks are painted into the rendered pixels before image embedding. The resulting
-      // PDF contains no original text/image objects, making these redactions irreversible.
+      // Masks are painted into pixels before embedding. Rebuilt affected pages
+      // contain no source text/image objects; unaffected pages remain original
+      // PDF pages. This is page-content removal, not a catalog-wide sanitization.
       const ctx = canvas.getContext('2d')
       const masks = list.filter((rect) => Number(rect.page) === n)
-      for (const rect of masks) {
+      for (const mark of masks) {
+        const rect = mark.normalized !== false ? reframeRegion(sourcePdf.getPage(n-1),mark) : mark
         const normalized = rect.normalized !== false && [rect.x, rect.y, rect.width, rect.height].every((v) => Number(v) >= 0 && Number(v) <= 1)
         const sx = normalized ? canvas.width : Number(options.dpi || 200) / 72
         const sy = normalized ? canvas.height : Number(options.dpi || 200) / 72
@@ -254,7 +418,7 @@ async function extractTextByPage(file, options = {}, onProgress) {
       if (!('str' in item) || !item.str.trim()) continue
       const y = Math.round(item.transform?.[5] ?? 0)
       const line = rows.get(y) || []
-      line.push({ x: item.transform?.[4] ?? 0, text: item.str })
+      line.push({ x: item.transform?.[4] ?? 0, width: Number(item.width) || 0, text: item.str })
       rows.set(y, line)
     }
     const lines = [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, items]) => {
@@ -264,7 +428,7 @@ async function extractTextByPage(file, options = {}, onProgress) {
         const separator = gap > 26 ? '  |  ' : gap > 10 ? '  ' : ' '
         end = part.x + (part.width || part.text.length * 3)
         return `${separator}${part.text}`
-      }).join('').replace(/\s+/g, ' ').trim()
+      }).join('').trim()
     }).filter(Boolean)
     pages.push(lines)
     if (!lines.length) imagePages.push(n)
@@ -275,13 +439,17 @@ async function extractTextByPage(file, options = {}, onProgress) {
     try {
       progress(onProgress, 0, 'Loading the OCR engine and language data…')
       const { createWorker } = await import('tesseract.js')
-      worker = await createWorker(options.language || 'eng', 1, {
+      const creation = createWorker(options.language || 'eng', 1, {
+      workerPath:new URL('ocr/worker.min.js',document.baseURI).href, corePath:new URL('ocr/',document.baseURI).href, langPath:new URL('ocr/',document.baseURI).href, workerBlobURL:false,
+        workerPath:new URL('ocr/worker.min.js',document.baseURI).href, corePath:new URL('ocr/',document.baseURI).href, langPath:new URL('ocr/',document.baseURI).href, workerBlobURL:false,
         logger: (state) => {
           const percent = Number(state.progress) || 0
           progress(onProgress, (currentPageIndex + percent) / imagePages.length, state.status === 'recognizing text' ? `Recognizing text on scanned page ${imagePages[currentPageIndex]} of ${doc.numPages}` : `Loading OCR ${state.status || 'engine'}…`)
         },
       })
-      const dpi = Math.max(120, Math.min(300, Number(options.ocrDpi || options.dpi) || 200))
+      creation.then(created=>{if(options.signal?.aborted)void created.terminate()}).catch(()=>{})
+    worker = await abortable(creation,options.signal)
+    const dpi = Math.max(120, Math.min(300, Number(options.ocrDpi || options.dpi) || 200))
       for (let index = 0; index < imagePages.length; index += 1) {
         currentPageIndex = index
         const pageNumber = imagePages[index]
@@ -302,21 +470,72 @@ async function extractTextByPage(file, options = {}, onProgress) {
 
 async function ocrPdf(file, options, onProgress) {
   requirePdf([file])
-  const pages = await extractTextByPage(file, options, onProgress)
-  const text = pages.map((lines, index) => `Page ${index + 1}\n${lines.join('\n')}`).join('\n\n')
-  if (!text.replace(/Page \d+/g, '').trim()) fail('OCR did not recognize any text in this PDF.')
-  return output(`${baseName(file)}_ocr.txt`, new TextEncoder().encode(text), 'text/plain;charset=utf-8')
+  const { pdf: outputPdf } = await loadPdf(file)
+  const sourceDoc = await getPdfJsDocument(file)
+  const imagePages = []
+  for (let n = 1; n <= sourceDoc.numPages; n += 1) {
+    const page = await sourceDoc.getPage(n)
+    const content = await page.getTextContent()
+    if (!content.items.some((item) => 'str' in item && item.str.trim())) imagePages.push(n)
+  }
+  if (!imagePages.length) fail('This PDF already contains selectable text on every page.')
+
+  let worker
+  let currentPageIndex = 0
+  let recognizedWords = 0
+  try {
+    progress(onProgress, 0, 'Loading the OCR engine and language data…')
+    const { createWorker } = await import('tesseract.js')
+    const creation = createWorker(options.language || 'eng', 1, {
+      workerPath:new URL('ocr/worker.min.js',document.baseURI).href, corePath:new URL('ocr/',document.baseURI).href, langPath:new URL('ocr/',document.baseURI).href, workerBlobURL:false,
+      logger: (state) => {
+        if(options.signal?.aborted)return
+        const percent = Number(state.progress) || 0
+        progress(onProgress, (currentPageIndex + percent) / imagePages.length, state.status === 'recognizing text' ? `Recognizing text on scanned page ${imagePages[currentPageIndex]} of ${sourceDoc.numPages}` : `Loading OCR ${state.status || 'engine'}…`)
+      },
+    })
+    creation.then(created=>{if(options.signal?.aborted)void created.terminate()}).catch(()=>{})
+    worker = await abortable(creation,options.signal)
+    const dpi = Math.max(120, Math.min(300, Number(options.ocrDpi || options.dpi) || 200))
+    const scale = dpi / 72
+    const font = await textFont(outputPdf, options.language === 'hin' ? 'हिंदी' : 'OCR')
+    for (let index = 0; index < imagePages.length; index += 1) {
+      currentPageIndex = index
+      const pageNumber = imagePages[index]
+      progress(onProgress, index / imagePages.length, `Preparing scanned page ${pageNumber} of ${sourceDoc.numPages} for OCR…`)
+      const { canvas } = await renderPage(sourceDoc, pageNumber, scale)
+      options.signal?.throwIfAborted()
+      const terminate=()=>void worker.terminate()
+      options.signal?.addEventListener('abort',terminate,{once:true})
+      let data
+      try { ({data}=await abortable(worker.recognize(canvas, {}, { blocks: true }),options.signal,terminate)) } finally {options.signal?.removeEventListener('abort',terminate)}
+      const page = outputPdf.getPage(pageNumber - 1)
+      const words = data.words || (data.blocks || []).flatMap(block => (block.paragraphs || []).flatMap(paragraph => (paragraph.lines || []).flatMap(line => line.words || [])))
+      recognizedWords += addOcrWords(page, words, font, canvas.width, canvas.height)
+      canvas.width = canvas.height = 0
+
+    }
+  } catch (error) {
+    if(error?.name==='AbortError')throw error
+    throw new Error(`OCR could not create a searchable PDF: ${error?.message || error}`)
+  } finally {
+    if (worker) await worker.terminate()
+  }
+  if (!recognizedWords) fail('OCR did not recognize any text in this PDF.')
+  progress(onProgress, 1, 'Adding searchable text to the original PDF…')
+  return output(`${baseName(file)}_searchable.pdf`, await savePdf(outputPdf))
 }
 
 async function textPdf(textPages, fileName, options = {}) {
   const doc = await PDFDocument.create()
-  const font = await doc.embedFont(StandardFonts.Helvetica)
+  const allText = textPages.flat().join('\n')
+  const font = await textFont(doc, allText)
   const fontSize = Math.min(12, Math.max(8, Number(options.fontSize) || 10))
   for (const lines of textPages) {
     let page = doc.addPage([612, 792])
     let y = 750
     for (const sourceLine of lines) {
-      const chunks = String(sourceLine).match(/.{1,92}(?:\s|$)/g) || [String(sourceLine)]
+      const chunks = String(sourceLine).match(/.{1,92}(?:\s|$)|.{1,92}/g) || [String(sourceLine)]
       for (const raw of chunks) {
         if (y < 45) { page = doc.addPage([612, 792]); y = 750 }
         page.drawText(raw.trim(), { x: 48, y, size: fontSize, font, color: rgb(0.08, 0.08, 0.08), maxWidth: 516 })
@@ -327,15 +546,259 @@ async function textPdf(textPages, fileName, options = {}) {
   return output(fileName, await savePdf(doc))
 }
 
-function parseTables(pages) {
-  const rows = []
-  for (const lines of pages) for (const line of lines) {
-    const cells = line.split(/\t+|\s{2,}|\s*\|\s*/).map((cell) => cell.trim()).filter(Boolean)
-    if (cells.length > 1) rows.push(cells)
+async function docxHtmlPdf(html, fileName, tableWidths = []) {
+  const doc = await PDFDocument.create()
+  const fonts = {
+    normal: await doc.embedFont(StandardFonts.Helvetica),
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
+    italic: await doc.embedFont(StandardFonts.HelveticaOblique),
+    boldItalic: await doc.embedFont(StandardFonts.HelveticaBoldOblique),
   }
-  if (!rows.length) fail('No table-like rows were detected. OCR can read scanned text, but this basic converter does not recognize table structure.')
-  const width = Math.max(...rows.map((row) => row.length))
-  return rows.map((row) => [...row, ...Array(Math.max(0, width - row.length)).fill('')])
+  const textFonts = new Map()
+  const pageWidth = 612, pageHeight = 792, margin = 54, contentWidth = pageWidth - margin * 2
+  let page, y
+  const newPage = () => { page = doc.addPage([pageWidth, pageHeight]); y = pageHeight - margin }
+  const ensureSpace = (height) => { if (!page || y - height < margin) newPage() }
+  const addBlock = async (element, defaults = {}) => {
+    const headingLevel = /^H[1-6]$/.test(element.tagName) ? Number(element.tagName[1]) : null
+    const size = defaults.size || (headingLevel ? [22, 18, 15, 13, 11, 10][headingLevel - 1] : 10)
+    const before = headingLevel ? 9 : 1
+    const after = headingLevel ? 5 : 7
+    const lineHeight = size * 1.35
+    // Mammoth emits embedded DOCX pictures as data URLs. Preserve those assets
+    // in the PDF instead of reducing them to their alt text.
+    const images = [...element.querySelectorAll('img')]
+    for (const imageElement of images) {
+      const source = imageElement.getAttribute('src') || ''
+      const match = source.match(/^data:(image\/(?:png|jpe?g));base64,([\s\S]+)$/i)
+      if (!match) continue
+      try {
+        const bytes = Uint8Array.from(atob(match[2]), (char) => char.charCodeAt(0))
+        const image = /^image\/png$/i.test(match[1]) ? await doc.embedPng(bytes) : await doc.embedJpg(bytes)
+        const maxWidth = contentWidth
+        const maxHeight = pageHeight - margin * 2
+        const points = (value) => {
+          const match = String(value || '').trim().match(/^([\d.]+)\s*(px|pt|in|cm)?$/i)
+          if (!match) return null
+          const amount = Number(match[1])
+          return match[2]?.toLowerCase() === 'in' ? amount * 72 : match[2]?.toLowerCase() === 'cm' ? amount * 72 / 2.54 : match[2]?.toLowerCase() === 'px' ? amount * 0.75 : amount
+        }
+        const requestedWidth = points(imageElement.getAttribute('width') || imageElement.style.width)
+        const requestedHeight = points(imageElement.getAttribute('height') || imageElement.style.height)
+        const scale = Math.min(maxWidth / image.width, maxHeight / image.height, requestedWidth ? requestedWidth / image.width : 1, requestedHeight ? requestedHeight / image.height : 1)
+        const width = image.width * scale, height = image.height * scale
+        const paragraph = imageElement.closest('p')
+        const align = paragraph?.classList.contains('pdf-center') ? 'center' : paragraph?.classList.contains('pdf-right') ? 'right' : 'left'
+        const x = margin + (align === 'center' ? (contentWidth - width) / 2 : align === 'right' ? contentWidth - width : 0)
+        ensureSpace(height + 8)
+        y -= height
+        page.drawImage(image, { x, y, width, height })
+        y -= 8
+      } catch (cause) {
+        throw new Error(`Could not render an embedded DOCX image: ${cause?.message || 'unsupported image data'}`)
+      }
+    }
+    const runs = []
+    const walk = (node, style = {}) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const value = node.nodeValue.replace(/\s+/g, ' ')
+        if (value) runs.push({ text: value, ...style })
+        return
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return
+      if (node.tagName === 'BR') { runs.push({ text: '\n', ...style }); return }
+      if (node.tagName === 'UL' || node.tagName === 'OL') return
+      if (node.tagName === 'IMG') return
+      const next = { ...style, bold: style.bold || ['B', 'STRONG', 'TH'].includes(node.tagName), italic: style.italic || ['I', 'EM'].includes(node.tagName) }
+      for (const child of node.childNodes) {
+        if (['TD', 'TH'].includes(child.tagName) && runs.length) runs.push({ text: '    ', ...next })
+        walk(child, next)
+      }
+    }
+    walk(element, { bold: !!headingLevel })
+    const words = []
+    for (const run of runs) for (const part of run.text.split(/(\n|\s+)/).filter(Boolean)) words.push({ ...run, text: part })
+    const lines = []
+    let line = [], lineWidth = 0
+    for (const word of words) {
+      if (word.text === '\n') { if (line.length) lines.push(line); line = []; lineWidth = 0; continue }
+      const standard = word.bold ? (word.italic ? StandardFonts.HelveticaBoldOblique : StandardFonts.HelveticaBold) : (word.italic ? StandardFonts.HelveticaOblique : StandardFonts.Helvetica)
+      const key = /[\u0900-\u097f]/u.test(word.text) ? 'NotoDevanagari' : standard
+      if (!textFonts.has(key)) textFonts.set(key, textFont(doc, word.text, standard))
+      const font = await textFonts.get(key)
+      if (/^\s+$/.test(word.text)) {
+        if (line.length) { line.push({ ...word, font }); lineWidth += font.widthOfTextAtSize(word.text, size) }
+        continue
+      }
+      const pieces = []
+      let piece = ''
+      for (const character of Array.from(word.text)) {
+        const next = piece + character
+        if (piece && font.widthOfTextAtSize(next, size) > contentWidth) { pieces.push(piece); piece = character }
+        else piece = next
+      }
+      if (piece) pieces.push(piece)
+      for (const part of pieces) {
+        const width = font.widthOfTextAtSize(part, size)
+        if (line.length && lineWidth + width > contentWidth) { lines.push(line); line = []; lineWidth = 0 }
+        line.push({ ...word, text: part, font }); lineWidth += width
+      }
+    }
+    if (line.length) lines.push(line)
+    ensureSpace(before + lineHeight + after)
+    y -= before
+    for (const row of lines) {
+      ensureSpace(lineHeight)
+      // Wrapping can leave a space at the end of a line. Align visible text,
+      // rather than including that invisible width in the centering calculation.
+      while (row.length && /^\s+$/.test(row[row.length - 1].text)) row.pop()
+      const rowWidth = row.reduce((sum, item) => sum + item.font.widthOfTextAtSize(item.text, size), 0)
+      const align = defaults.align || (element.classList.contains('pdf-center') ? 'center' : element.classList.contains('pdf-right') ? 'right' : 'left')
+      let x = margin + (defaults.indent || 0) + (align === 'center' ? Math.max(0, contentWidth - rowWidth) / 2 : align === 'right' ? Math.max(0, contentWidth - rowWidth) : 0)
+      if (defaults.bullet) {
+        page.drawText(defaults.bullet, { x, y, size, font: fonts.normal, color: rgb(0.08, 0.08, 0.08) })
+        x += 15
+      }
+      for (const item of row) {
+        page.drawText(item.text, { x, y, size, font: item.font, color: rgb(0.08, 0.08, 0.08) })
+        x += item.font.widthOfTextAtSize(item.text, size)
+      }
+      y -= lineHeight
+    }
+    y -= after
+  }
+  const root = new DOMParser().parseFromString(html, 'text/html').body
+  const htmlTables = [...root.querySelectorAll('table')]
+  const scaledTableWidths = htmlTables.map((_, index) => {
+    const columns = tableWidths[index]
+    if (!columns?.length || columns.some((width) => !(width > 0))) return null
+    const total = columns.reduce((sum, width) => sum + width, 0)
+    return columns.map((width) => contentWidth * width / total)
+  })
+  let tableIndex = 0
+  const renderTable = (table) => {
+    const rows = [...table.querySelectorAll('tr')].map((row) => [...row.children].filter((cell) => ['TD', 'TH'].includes(cell.tagName)))
+    const columnCount = Math.max(0, ...rows.map((row) => row.length))
+    if (!columnCount) return
+    const widths = scaledTableWidths[tableIndex++]
+    const columnWidths = widths?.length === columnCount ? widths : Array(columnCount).fill(contentWidth / columnCount)
+    const fontSize = 9, lineHeight = 12
+    for (const cells of rows) {
+      const prepared = Array.from({ length: columnCount }, (_, index) => {
+        const cell = cells[index]
+        const paragraphs = cell ? [...cell.querySelectorAll('p')].map((item) => item.innerText.trim()).filter(Boolean) : []
+        const text = (paragraphs.length ? paragraphs : [cell?.innerText || '']).join('\n')
+        const paragraph = cell?.querySelector('p')
+        const align = paragraph?.classList.contains('pdf-center') ? 'center' : paragraph?.classList.contains('pdf-right') ? 'right' : 'left'
+        const font = cell?.tagName === 'TH' || cell?.querySelector('strong,b') ? fonts.bold : cell?.querySelector('em,i') ? fonts.italic : fonts.normal
+        const lines = []
+        let current = ''
+        for (const sourceLine of text.split(/\r?\n/)) {
+          if (current) { lines.push(current); current = '' }
+          for (let word of sourceLine.split(/\s+/).filter(Boolean)) {
+            const maxWidth = Math.max(1, columnWidths[index] - 10)
+            if (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
+              let piece = ''
+              const pieces = []
+              for (const character of word) {
+                if (piece && font.widthOfTextAtSize(piece + character, fontSize) > maxWidth) { pieces.push(piece); piece = character }
+                else piece += character
+              }
+              if (piece) pieces.push(piece)
+              word = pieces.join(' ')
+            }
+            for (const part of word.split(' ')) {
+              const candidate = current ? `${current} ${part}` : part
+              if (current && font.widthOfTextAtSize(candidate, fontSize) > columnWidths[index] - 10) { lines.push(current); current = part }
+              else current = candidate
+            }
+          }
+        }
+        if (current) lines.push(current)
+        return { lines, font, align }
+      })
+      const maxLines = Math.max(1, ...prepared.map((cell) => cell.lines.length))
+      const linesPerPage = Math.max(1, Math.floor((pageHeight - margin * 2 - 8) / lineHeight))
+      for (let offset = 0; offset < maxLines; offset += linesPerPage) {
+        const chunkLines = Math.min(linesPerPage, maxLines - offset)
+        const height = Math.max(20, chunkLines * lineHeight + 8)
+        ensureSpace(height)
+        const top = y
+        prepared.forEach((cell, index) => {
+          const x = margin + columnWidths.slice(0, index).reduce((sum, width) => sum + width, 0)
+          cell.lines.slice(offset, offset + linesPerPage).forEach((line, lineIndex) => {
+            const textWidth = cell.font.widthOfTextAtSize(line, fontSize)
+            const textX = cell.align === 'center' ? x + Math.max(5, (columnWidths[index] - textWidth) / 2) : cell.align === 'right' ? x + Math.max(5, columnWidths[index] - textWidth - 5) : x + 5
+            page.drawText(line, { x: textX, y: top - 14 - lineIndex * lineHeight, size: fontSize, font: cell.font, color: rgb(0.08, 0.08, 0.08) })
+          })
+        })
+        y = top - height
+      }
+    }
+    y -= 8
+  }
+  for (const element of root.children) {
+    if (element.tagName === 'TABLE') { renderTable(element); continue }
+    if (/^H[1-6]$/.test(element.tagName) || ['P', 'BLOCKQUOTE', 'PRE'].includes(element.tagName)) {
+      await addBlock(element, { indent: element.tagName === 'BLOCKQUOTE' ? 22 : 0 })
+    } else if (element.tagName === 'UL' || element.tagName === 'OL') {
+      const renderList = async (list, depth = 0) => {
+        let index = Number(list.getAttribute('start')) || 1
+        for (const item of [...list.children].filter((child) => child.tagName === 'LI')) {
+          await addBlock(item, { indent: 12 + depth * 16, bullet: list.tagName === 'OL' ? `${index++}.` : '•' })
+          for (const nested of [...item.children].filter((child) => child.tagName === 'UL' || child.tagName === 'OL')) await renderList(nested, depth + 1)
+        }
+      }
+      await renderList(element)
+    } else if (element.textContent.trim() || element.querySelector('img')) await addBlock(element)
+  }
+  if (!page && root.querySelector('img')) newPage()
+  if (!page) fail('No text could be extracted from this DOCX file.')
+  return output(fileName, await savePdf(doc))
+}
+
+async function readDocxLayout(file) {
+  const JSZip = await import('jszip')
+  const archive = await JSZip.default.loadAsync(await file.arrayBuffer())
+  const parser = new DOMParser()
+  const documentXml = parser.parseFromString(await archive.file('word/document.xml').async('string'), 'application/xml')
+  const stylesEntry = archive.file('word/styles.xml')
+  const stylesXml = stylesEntry ? parser.parseFromString(await stylesEntry.async('string'), 'application/xml') : null
+  const styleMap = new Map()
+  let defaultStyleId = 'Normal'
+  for (const style of stylesXml?.getElementsByTagName('w:style') || []) {
+    if (style.getAttribute('w:type') !== 'paragraph') continue
+    const id = style.getAttribute('w:styleId')
+    const alignment = style.getElementsByTagName('w:jc')[0]?.getAttribute('w:val')
+    const basedOn = style.getElementsByTagName('w:basedOn')[0]?.getAttribute('w:val')
+    if (style.getAttribute('w:default') === '1') defaultStyleId = id
+    styleMap.set(id, { alignment, basedOn })
+  }
+  const alignmentForStyle = (styleId, visited = new Set()) => {
+    if (!styleId || visited.has(styleId)) return null
+    visited.add(styleId)
+    const style = styleMap.get(styleId)
+    return style?.alignment || alignmentForStyle(style?.basedOn, visited)
+  }
+  const defaultAlignment = stylesXml?.getElementsByTagName('w:docDefaults')[0]?.getElementsByTagName('w:jc')[0]?.getAttribute('w:val') || alignmentForStyle(defaultStyleId)
+  const alignedStyles = []
+  for (const paragraph of documentXml.getElementsByTagName('w:p')) {
+    const properties = paragraph.getElementsByTagName('w:pPr')[0]
+    const styleId = properties?.getElementsByTagName('w:pStyle')[0]?.getAttribute('w:val') || defaultStyleId
+    const alignment = properties?.getElementsByTagName('w:jc')[0]?.getAttribute('w:val') || alignmentForStyle(styleId) || defaultAlignment
+    if (alignment === 'center' || alignment === 'right') alignedStyles.push({ styleId, alignment })
+  }
+  const tableWidths = [...documentXml.getElementsByTagName('w:tbl')].map((table) => {
+    const grid = [...table.getElementsByTagName('w:gridCol')].map((column) => Number(column.getAttribute('w:w')))
+    if (grid.length && grid.every((width) => width > 0)) return grid
+    const firstRow = table.getElementsByTagName('w:tr')[0]
+    return [...(firstRow?.children || [])].filter((cell) => cell.localName === 'tc').map((cell) => Number(cell.getElementsByTagName('w:tcW')[0]?.getAttribute('w:w'))).filter((width) => width > 0)
+  })
+  return { tableWidths, alignmentForStyle, alignedStyles, defaultStyleId }
+}
+
+function alignedDocxStyle(styleId, alignment) {
+  return `PdfKing${alignment === 'center' ? 'Center' : 'Right'}_${(styleId || 'Normal').replace(/[^A-Za-z0-9_]/g, '_')}`
 }
 
 async function imagePdf(files, options, onProgress) {
@@ -361,10 +824,10 @@ async function imagePdf(files, options, onProgress) {
 
 async function applyTextOverlay(file, options, mode) {
   const { pdf } = await loadPdf(file)
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const text = String(options.text ?? options.watermarkText ?? 'CONFIDENTIAL')
+  const font = await textFont(pdf, `${text}\n${options.format || ''}`)
   const selected = options.pages ? new Set(parsePageList(options.pages, pdf.getPageCount())) : null
   const start = Number(options.startNumber ?? options.startAt ?? 1)
-  const text = String(options.text ?? options.watermarkText ?? 'CONFIDENTIAL')
   if (mode === 'watermark' && !text.trim()) fail('Enter watermark text before applying it.')
   const opacity = Math.max(0.05, Math.min(1, Number(options.opacity ?? 0.25)))
   const angle = Number(options.angle ?? 45)
@@ -374,7 +837,8 @@ async function applyTextOverlay(file, options, mode) {
   pdf.getPages().forEach((page, index) => {
     const n = index + 1
     if (selected && !selected.has(n)) return
-    const { width, height } = page.getSize()
+    const frame=displayFrame(page),{width,height}=frame
+    page.pushOperators(pushGraphicsState(),concatTransformationMatrix(...frame.matrix))
     if (mode === 'watermark') {
       page.drawText(text, { x: width * 0.13, y: height * 0.48, size: fontSize, font, color, opacity, rotate: degrees(angle), maxWidth: width * 0.75 })
     } else {
@@ -385,9 +849,12 @@ async function applyTextOverlay(file, options, mode) {
       const y = vertical === 'top' ? height - 36 - fontSize : 28
       page.drawText(label, { x, y, size: fontSize, font, color, opacity: 1 })
     }
+    page.pushOperators(popGraphicsState())
   })
   return output(`${baseName(file)}_${mode === 'watermark' ? 'watermarked' : 'numbered'}.pdf`, await savePdf(pdf))
 }
+
+async function normalizedRectToPage(file, pageNumber, page, rect) { return pdfRect(displayFrame(page, Number(rect.viewerRotation)||0), rect) }
 
 async function cropPdf(file, options) {
   const { pdf } = await loadPdf(file)
@@ -397,9 +864,10 @@ async function cropPdf(file, options) {
   const selected = options.pages ? new Set(parsePageList(options.pages, pdf.getPageCount())) : null
   pdf.getPages().forEach((page, index) => {
     if (selected && !selected.has(index + 1)) return
-    const { width, height } = page.getSize()
+    const frame=displayFrame(page),{width,height}=frame
     if (left + right >= width || top + bottom >= height) fail(`Crop margins leave no printable area on page ${index + 1}.`)
-    page.setCropBox(left, bottom, width - left - right, height - top - bottom)
+    const box=pdfRect(frame,{x:left/width,y:top/height,width:1-(left+right)/width,height:1-(top+bottom)/height})
+    page.setCropBox(box.x,box.y,box.width,box.height)
   })
   return output(`${baseName(file)}_cropped.pdf`, await savePdf(pdf))
 }
@@ -410,8 +878,6 @@ async function reorderPdf(file, options) {
   const result = await PDFDocument.create()
   const copied = await result.copyPages(pdf, order.map((n) => n - 1))
   copied.forEach((page, index) => {
-    const angle = Number(options.rotation || 0)
-    if (angle) page.setRotation(degrees(((page.getRotation().angle + angle) % 360 + 360) % 360))
     result.addPage(page)
   })
   return output(`${baseName(file)}_organized.pdf`, await savePdf(result))
@@ -424,10 +890,57 @@ async function addVisibleText(file, options, mode) {
   const pageNumber = Number(mode === 'signature' ? options.signaturePage || 1 : options.annotationPage || 1)
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pdf.getPageCount()) fail(`Choose a page between 1 and ${pdf.getPageCount()}.`)
   const page = pdf.getPage(pageNumber - 1)
-  const font = await pdf.embedFont(mode === 'signature' ? StandardFonts.TimesRomanItalic : StandardFonts.Helvetica)
+  const font = await textFont(pdf, text, mode === 'signature' ? StandardFonts.TimesRomanItalic : StandardFonts.Helvetica)
   const size = mode === 'signature' ? 24 : 12
   page.drawText(text, { x: 54, y: Math.max(40, page.getHeight() - 110), size, font, color: rgb(0.08, 0.12, 0.24), maxWidth: page.getWidth() - 108 })
   return output(`${baseName(file)}_${mode === 'signature' ? 'signed' : 'annotated'}.pdf`, await savePdf(pdf))
+}
+
+async function editPdfText(file, edits = []) {
+  const data = await commitOperations(file, edits.map(edit => ({...edit,type:'text'})))
+  return output(`${baseName(file)}_edited.pdf`, data)
+}
+
+async function editPdfImages(file, edits = []) {
+  if (!Array.isArray(edits) || !edits.length) fail('Select or change at least one image before saving.')
+  const { pdf } = await loadPdf(file)
+  for (const edit of edits) {
+    const pageNumber = Number(edit.page)
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pdf.getPageCount()) fail('An image edit refers to a page that is no longer in this PDF.')
+    const page = pdf.getPage(pageNumber - 1)
+    const original = edit.original || edit
+    const originalBox = await normalizedRectToPage(file, pageNumber, page, original)
+    if (originalBox.width <= 0 || originalBox.height <= 0) continue
+    page.drawRectangle({ ...originalBox, color: rgb(1, 1, 1) })
+
+    const source = edit.replacementData || edit.sourceData
+    if (!source) continue
+    let blob = source instanceof Blob ? source : new Blob([source], { type: edit.replacementType || 'image/png' })
+    const crop = edit.crop || {}
+    const top = Math.max(0, Math.min(0.95, (Number(crop.top) || 0) / 100))
+    const right = Math.max(0, Math.min(0.95, (Number(crop.right) || 0) / 100))
+    const bottom = Math.max(0, Math.min(0.95, (Number(crop.bottom) || 0) / 100))
+    const left = Math.max(0, Math.min(0.95, (Number(crop.left) || 0) / 100))
+    let outputMime = edit.replacementType || blob.type
+    if (top || right || bottom || left) {
+      const bitmap = await createImageBitmap(blob)
+      const sx = Math.round(bitmap.width * left)
+      const sy = Math.round(bitmap.height * top)
+      const sw = Math.max(1, Math.round(bitmap.width * (1 - left - right)))
+      const sh = Math.max(1, Math.round(bitmap.height * (1 - top - bottom)))
+      const canvas = document.createElement('canvas')
+      canvas.width = sw; canvas.height = sh
+      canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
+      bitmap.close?.()
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      outputMime = 'image/png'
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    const embedded = outputMime === 'image/jpeg' ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes)
+    const target = await normalizedRectToPage(file, pageNumber, page, edit)
+    page.drawImage(embedded, target)
+  }
+  return output(`${baseName(file)}_images-edited.pdf`, await savePdf(pdf))
 }
 
 async function fillForm(file, options) {
@@ -445,7 +958,7 @@ async function fillForm(file, options) {
     try {
       if (typeof field.setText === 'function') field.setText(String(value))
       else if (typeof field.check === 'function') String(value).toLowerCase() === 'true' ? field.check() : field.uncheck()
-      else if (typeof field.select === 'function') field.select(String(value))
+      else if (typeof field.select === 'function') field.select(Array.isArray(value) ? value : String(value))
       else fail(`Field “${name}” is not a supported text, checkbox, or choice field.`)
     } catch (error) { throw new Error(`Could not fill “${name}”: ${error.message}`) }
   }
@@ -501,7 +1014,7 @@ async function processKnown(toolId, files, options, onProgress) {
 
   if (['split-pdf', 'extract-pages'].includes(toolId)) {
     requirePdf(files)
-    const outputs = await extractGroups(file, { ...options, groupRanges: toolId === 'extract-pages' ? false : options.groupRanges, mode: toolId === 'split-pdf' ? (options.mode || options.splitMode) : undefined }, onProgress)
+    const outputs = await extractGroups(file, { ...options, ranges: toolId === 'extract-pages' ? (options.pages ?? options.ranges) : options.ranges, groupRanges: toolId === 'extract-pages' ? false : options.groupRanges, mode: toolId === 'split-pdf' ? (options.mode || options.splitMode) : undefined }, onProgress)
     if (toolId === 'extract-pages' && outputs.length !== 1) fail('Extract pages creates one PDF. Use split mode “all” to create a separate PDF for each page.')
     return outputs
   }
@@ -544,7 +1057,7 @@ async function processKnown(toolId, files, options, onProgress) {
     requirePdf(files)
     const { pdf } = await loadPdf(file)
     const selected = options.pages ? new Set(parsePageList(options.pages, pdf.getPageCount())) : null
-    const angle = Number(options.angle ?? options.rotation ?? 90)
+    const angle = Number(options.rotation ?? options.angle ?? 90)
     if (![90, 180, 270, -90, -180, -270].includes(angle)) fail('Rotation must be 90°, 180°, or 270° clockwise.')
     pdf.getPages().forEach((page, index) => {
       if (selected && !selected.has(index + 1)) return
@@ -557,6 +1070,9 @@ async function processKnown(toolId, files, options, onProgress) {
   if (toolId === 'add-watermark') { requirePdf(files); return [await applyTextOverlay(file, options, 'watermark')] }
   if (toolId === 'page-numbers') { requirePdf(files); return [await applyTextOverlay(file, options, 'numbers')] }
   if (toolId === 'pdf-editor') { requirePdf(files); return [await addVisibleText(file, options, 'annotation')] }
+  if (toolId === 'edit-text') { requirePdf(files); return [await editPdfText(file, options.textEdits)] }
+  if (toolId === 'add-text') { requirePdf(files); return [await editPdfText(file, options.textEdits)] }
+  if (toolId === 'images') { requirePdf(files); return [await editPdfImages(file, options.imageEdits)] }
   if (toolId === 'sign-pdf') { requirePdf(files); return [await addVisibleText(file, options, 'signature')] }
   if (toolId === 'fill-forms') { requirePdf(files); return [await fillForm(file, options)] }
   if (toolId === 'edit-bookmarks') { requirePdf(files); return [await editBookmarks(file, options)] }
@@ -613,28 +1129,75 @@ async function processKnown(toolId, files, options, onProgress) {
   if (toolId === 'compress-pdf') {
     requirePdf(files)
     const level = options.level || options.compressLevel || 'recommended'
-    if (level === 'lossless') {
-      try {
-        const toolkit = await getQpdfToolkit()
-        const compressed = await toolkit.compress(await readFile(file))
-        const delta = Math.round((compressed.byteLength / file.size - 1) * 100)
-        const result = output(`${baseName(file)}_optimized.pdf`, compressed)
-        result.message = delta < 0 ? `Lossless optimization reduced file size by ${Math.abs(delta)}% while preserving page content.` : delta > 0 ? `Lossless optimization preserved page content but increased file size by ${delta}%.` : 'Lossless optimization preserved page content; file size was unchanged.'
-        return [result]
-      } catch (error) { throw new Error(`Lossless optimization failed: ${error.message}`) }
-    }
     const qualityByLevel = { extreme: 0.42, recommended: 0.68, light: 0.86 }
-    const dpiByLevel = { extreme: 110, recommended: 150, light: 200 }
-    const compressed = await rasterPdf(file, { dpi: options.dpi || dpiByLevel[level] || 150, quality: options.quality || qualityByLevel[level] || 0.68 }, onProgress)
-    const reduction = Math.round((1 - compressed.byteLength / file.size) * 100)
-    const result = output(`${baseName(file)}_compressed.pdf`, compressed)
-    result.message = reduction > 0 ? `Raster recompression reduced the file by ${reduction}%. Text, vectors, links, forms, and accessibility data were flattened into page images.` : `The rasterized output is ${Math.abs(reduction)}% larger. This scan-friendly compression cannot make every PDF smaller; text, vectors, links, forms, and accessibility data were flattened.`
+    const dimensionsByLevel = { extreme: 1400, recommended: 2000, light: 2800 }
+    const quality = Math.max(0.25, Math.min(1, Number(options.quality) || qualityByLevel[level] || 0.68))
+    const maxDimension = dimensionsByLevel[level] || 2000
+    const targetReduction = level === 'recommended' ? 0.7 : level === 'extreme' ? 0.85 : 0
+    const source = await readFile(file)
+    const toolkit = await getQpdfToolkit()
+    progress(onProgress, 0.05, 'Compressing document streams, fonts, and resources…')
+    const compressed = await compressPdfBytes(source, {
+      targetReduction,
+      optimizeFonts: targetReduction && window.pdfKing?.convertType1Fonts ? (bytes) => optimizePdfType1Fonts(bytes, (data) => window.pdfKing.convertType1Fonts(data)) : undefined,
+      imagePasses: level === 'recommended'
+        ? [{ quality, maxDimension }, { quality: Math.min(quality, 0.55), maxDimension: 1700 }, { quality: Math.min(quality, 0.42), maxDimension: 1400 }, { quality: Math.min(quality, 0.32), maxDimension: 1100 }, { quality: Math.min(quality, 0.28), maxDimension: 900 }, { quality: Math.min(quality, 0.25), maxDimension: 750 }, { quality: Math.min(quality, 0.22), maxDimension: 650 }, { quality: Math.min(quality, 0.2), maxDimension: 550 }]
+        : level === 'extreme'
+          ? [{ quality, maxDimension }, { quality: Math.min(quality, 0.32), maxDimension: 1100 }, { quality: Math.min(quality, 0.25), maxDimension: 900 }, { quality: Math.min(quality, 0.25), maxDimension: 750 }, { quality: Math.min(quality, 0.22), maxDimension: 650 }, { quality: Math.min(quality, 0.2), maxDimension: 550 }]
+          : [{ quality, maxDimension }],
+      optimize: (bytes) => optimizePdfDocument(bytes, { toolkit, onProgress: (state) => onProgress?.({ ...state, value: 0.05 + state.value * 0.1 }) }),
+      recompressImages: level === 'lossless' ? undefined : (bytes, settings) => recompressPdfImages(bytes, {
+        ...settings,
+        createCanvas: (width, height) => { const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; return canvas },
+        decodeJpeg: (bytes) => createImageBitmap(new Blob([bytes], { type: JPG_MIME })),
+        decodePdfImage: async (bytes, scale) => {
+          options.signal?.throwIfAborted()
+          const task = pdfjs.getDocument({ data: bytes, wasmUrl: pdfImageWasmUrl, stopAtErrors: true })
+          try {
+            const doc = await task.promise
+            const page = await doc.getPage(1)
+            const viewport = page.getViewport({ scale })
+            const canvas = document.createElement('canvas')
+            canvas.width = Math.max(1, Math.round(viewport.width))
+            canvas.height = Math.max(1, Math.round(viewport.height))
+            await page.render({ canvas: null, canvasContext: canvas.getContext('2d', { alpha: true }), viewport, background: 'rgba(0,0,0,0)' }).promise
+            // PDF.js can log an image decode failure and render a blank page
+            // without rejecting render(). Never replace an image in that case.
+            const operators = await page.getOperatorList()
+            for (let index = 0; index < operators.fnArray.length; index += 1) {
+              if (operators.fnArray[index] !== pdfjs.OPS.paintImageXObject) continue
+              const id = operators.argsArray[index][0]
+              const objects = id.startsWith('g_') ? page.commonObjs : page.objs
+              const object = await abortable(new Promise((resolve) => objects.get(id, resolve)), options.signal)
+              if (!object) throw new Error('Embedded image decoding failed.')
+            }
+            options.signal?.throwIfAborted()
+            return canvas
+          } finally { await task.destroy() }
+        },
+        encodeJpeg: async (canvas, quality) => new Uint8Array(await (await canvasBlob(canvas, JPG_MIME, quality)).arrayBuffer()),
+        onProgress: (state) => onProgress?.({ ...state, value: 0.1 + state.value * 0.8 }),
+      }),
+    })
+    const reduction = ((1 - compressed.data.byteLength / source.byteLength) * 100).toFixed(1)
+    const result = output(`${baseName(file)}_${level === 'lossless' ? 'optimized' : 'compressed'}.pdf`, compressed.data)
+    result.compression = { originalSize: compressed.originalSize, compressedSize: compressed.compressedSize, reduction: compressed.reduction, targetReduction, targetMet: compressed.targetMet }
+    result.message = compressed.reduced
+      ? `Reduced file size by ${reduction}%. ${compressed.changedImages ? `${compressed.changedImages} embedded image${compressed.changedImages === 1 ? '' : 's'} recompressed. ` : ''}${compressed.changedFonts ? `${compressed.changedFonts} embedded fonts optimized. ` : ''}Text, links, forms, and page content were preserved.`
+      : 'The available optimizations did not produce a meaningfully smaller PDF. The original file was kept unchanged.'
+    if (compressed.skippedImages) result.message += ` ${compressed.skippedImages} embedded image${compressed.skippedImages === 1 ? '' : 's'} could not be optimized safely.`
+    if (targetReduction && !compressed.targetMet) result.message += ` The ${Math.round(targetReduction * 100)}% reduction target could not be reached while preserving normal PDF features and this mode’s image quality limits.`
     return [result]
   }
 
   if (toolId === 'redact-pdf') {
     requirePdf(files)
     if (!Array.isArray(options.redactions) || !options.redactions.length) fail('Mark at least one redaction rectangle before applying redactions. Coordinates should be normalized from 0 to 1 with a one-based page number.')
+    const info = await inspectPdf(file)
+    for (const rect of options.redactions) {
+      const page = Number(rect.page)
+      if (!Number.isInteger(page) || page < 1 || page > info.pageCount) fail(`Redaction page must be between 1 and ${info.pageCount}.`)
+    }
     const redacted = await rasterPdf(file, { ...options, dpi: options.dpi || 200, quality: 1 }, onProgress, options.redactions)
     return [output(`${baseName(file)}_redacted.pdf`, redacted)]
   }
@@ -665,106 +1228,8 @@ async function processKnown(toolId, files, options, onProgress) {
   if (toolId === 'pdf-to-word') {
     requirePdf(files)
     const pdf = await getPdfJsDocument(file)
-    const { Document, Packer, Paragraph, TextRun } = await import('docx')
-    const sections = []
-    const pageData = []
-    const scannedPages = []
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber)
-      const viewport = page.getViewport({ scale: 1 })
-      const content = await page.getTextContent()
-      const items = content.items.filter((item) => 'str' in item && item.str.trim())
-      const styles = content.styles || {}
-      if (!items.length) scannedPages.push(pageNumber)
-      pageData.push({ pageNumber, width: viewport.width, height: viewport.height, items, styles })
-    }
-
-    // Use OCR only for pages with no extractable text layer. OCR output remains
-    // normal editable Word text instead of a screenshot of the page.
-    let ocrPages = []
-    if (scannedPages.length) {
-      const extracted = await extractTextByPage(file, options, onProgress)
-      ocrPages = scannedPages.map((number) => extracted[number - 1] || [])
-    }
-    let scannedIndex = 0
-    let previousProgress = 0
-    for (const pageInfo of pageData) {
-      const { pageNumber, width: pageWidth, height: pageHeight, items, styles } = pageInfo
-      let paragraphs = []
-      if (items.length) {
-        const rows = []
-        for (const item of items) {
-          const baseline = Number(item.transform?.[5]) || 0
-          const fontSize = Math.max(5, Math.min(96, Math.hypot(Number(item.transform?.[0]) || 0, Number(item.transform?.[1]) || 0) || Number(item.height) || 10))
-          let row = rows.find((entry) => Math.abs(entry.baseline - baseline) <= Math.max(1.5, Math.min(4, fontSize * 0.22)))
-          if (!row) {
-            row = { baseline, items: [], fontSize }
-            rows.push(row)
-          }
-          row.items.push({ item, x: Number(item.transform?.[4]) || 0, width: Number(item.width) || 0, fontSize })
-          row.fontSize = Math.max(row.fontSize, fontSize)
-          row.baseline = (row.baseline * (row.items.length - 1) + baseline) / row.items.length
-        }
-        rows.sort((a, b) => b.baseline - a.baseline)
-        let previousBaseline = pageHeight
-        paragraphs = rows.map((row) => {
-          row.items.sort((a, b) => a.x - b.x)
-          const firstX = Math.max(0, row.items[0]?.x || 0)
-          const runs = []
-          let endX = firstX
-          for (const part of row.items) {
-            const gap = part.x - endX
-            if (gap > part.fontSize * 0.18) {
-              const spaces = Math.max(1, Math.min(64, Math.round(gap / Math.max(1.5, part.fontSize * 0.25))))
-              runs.push(new TextRun({ text: ' '.repeat(spaces) }))
-            }
-            const item = part.item
-            const style = styles[item.fontName] || {}
-            const fontName = String(style.fontFamily || item.fontName || 'Arial').replace(/^\w{6}\+/, '')
-            const descriptor = `${fontName} ${item.fontName || ''}`
-            runs.push(new TextRun({
-              text: item.str,
-              font: fontName,
-              size: Math.round(part.fontSize * 2),
-              bold: /bold|black|heavy|demi|semibold/i.test(descriptor),
-              italics: /italic|oblique/i.test(descriptor),
-            }))
-            endX = Math.max(endX, part.x + part.width)
-          }
-          const before = Math.max(0, Math.round((previousBaseline - row.baseline - row.fontSize * 1.15) * 20))
-          previousBaseline = row.baseline
-          return new Paragraph({
-            indent: { left: Math.round(firstX * 20) },
-            spacing: { before, after: 0 },
-            children: runs,
-          })
-        })
-      } else {
-        const lines = ocrPages[scannedIndex++] || []
-        paragraphs = lines.map((line) => new Paragraph({
-          spacing: { before: 0, after: 80 },
-          children: [new TextRun({ text: line, font: 'Arial', size: 20 })],
-        }))
-      }
-      if (!paragraphs.length) paragraphs = [new Paragraph('')]
-      sections.push({
-        properties: {
-          page: {
-            size: { width: Math.round(pageWidth * 20), height: Math.round(pageHeight * 20) },
-            margin: { top: 0, right: 0, bottom: 0, left: 0 },
-          },
-        },
-        children: paragraphs,
-      })
-      const value = pageNumber / pdf.numPages
-      if (value > previousProgress) progress(onProgress, value, `Rebuilding editable text on page ${pageNumber} of ${pdf.numPages}`)
-      previousProgress = value
-    }
-    const doc = new Document({ sections })
-    const blob = await Packer.toBlob(doc)
-    const result = output(`${baseName(file)}.docx`, new Uint8Array(await blob.arrayBuffer()), DOCX_MIME)
-    result.message = 'PDF text is editable in Word. Font styling and approximate text placement are retained; scanned pages use OCR and complex layouts may need cleanup.'
-    return [result]
+    const { convertPdfToWord } = await import('./pdfToWord')
+    return convertPdfToWord({ pdfjs, pdf, file, options, onProgress, extractTextByPage, renderPage, canvasBlob })
   }
 
   if (toolId === 'word-to-pdf') {
@@ -772,38 +1237,136 @@ async function processKnown(toolId, files, options, onProgress) {
     if (!/\.docx$/i.test(file.name || '') && file.type !== DOCX_MIME) fail('Choose a .docx document. Legacy .doc files need Microsoft Word or LibreOffice to convert.')
     try {
       const mammoth = await import('mammoth')
-      const pages = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })
-      const content = pages.value.split(/\n\s*\n/).map((p) => [p.trim()]).filter((p) => p[0])
-      if (!content.length) fail('No text could be extracted from this DOCX file.')
-      const result = await textPdf(content, `${baseName(file)}.pdf`, options)
-      result.message = 'Basic text-only conversion. Original fonts, images, tables, page layout, headers, and footers are not preserved.'
+      const { tableWidths, alignmentForStyle, alignedStyles, defaultStyleId } = await readDocxLayout(file)
+      const styleMap = [...new Set(alignedStyles.map(({ styleId, alignment }) => {
+        const heading = styleId.match(/heading\s*([1-6])|heading([1-6])/i)
+        const outputTag = heading ? `h${heading[1] || heading[2]}` : /title/i.test(styleId) ? 'h1' : 'p'
+        return `p.${alignedDocxStyle(styleId, alignment)} => ${outputTag}.pdf-${alignment}:fresh`
+      }))]
+      const converted = await mammoth.convertToHtml({
+        arrayBuffer: await file.arrayBuffer(),
+      }, {
+        styleMap,
+        transformDocument: mammoth.transforms.paragraph((paragraph) => {
+          const styleId = paragraph.styleId || defaultStyleId
+          const alignment = paragraph.alignment || alignmentForStyle(styleId)
+          if (alignment !== 'center' && alignment !== 'right') return paragraph
+          return { ...paragraph, styleId: alignedDocxStyle(styleId, alignment) }
+        }),
+      })
+      const hasText = converted.value.replace(/<[^>]*>/g, '').trim()
+      const hasEmbeddedImages = /<img\b[^>]*>/i.test(converted.value)
+      if (!hasText && !hasEmbeddedImages) fail('No text or supported images could be extracted from this DOCX file.')
+      const result = await docxHtmlPdf(converted.value, `${baseName(file)}.pdf`, tableWidths)
+      result.message = 'DOCX text styling and embedded images are retained. This local renderer substitutes unavailable fonts and may reflow pages or complex layouts.'
       return [result]
     } catch (error) { throw new Error(`Could not convert this DOCX: ${error.message}`) }
   }
 
-  if (toolId === 'pdf-to-excel') {
+  if (toolId === 'pdf-to-pptx') {
     requirePdf(files)
-    const pages = await extractTextByPage(file, options, onProgress)
-    const rows = parseTables(pages)
-    const XLSX = await import('xlsx')
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Extracted text')
-    const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })
-    return [output(`${baseName(file)}.xlsx`, bytes, XLSX_MIME)]
+    const doc = await getPdfJsDocument(file)
+    const pptxModule = await import('pptxgenjs')
+    const pptx = new pptxModule.default()
+    const firstPage = await doc.getPage(1)
+    const firstViewport = firstPage.getViewport({ scale: 1 })
+    const slideWidth = Math.max(1, firstViewport.width / 72)
+    const slideHeight = Math.max(1, firstViewport.height / 72)
+    pptx.defineLayout({ name: 'PDF_PAGE', width: slideWidth, height: slideHeight })
+    pptx.layout = 'PDF_PAGE'
+    pptx.author = 'PDF King'
+    pptx.subject = 'Slides converted from PDF pages'
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      const page = await doc.getPage(pageNumber)
+      const viewport = page.getViewport({ scale: 1 })
+      const textContent = await page.getTextContent()
+      const textColors = extractTextColorStyles(await page.getOperatorList(), pdfjs.OPS, textContent.items)
+      const { canvas } = await renderPage(doc, pageNumber, 2)
+      const pagePixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height)
+      const editableTexts = []
+      const masks = []
+      textContent.items.forEach((item, index) => {
+        if (!('str' in item) || !item.str.trim() || item.dir === 'ttb') return
+        const transform = item.transform || []
+        const fontSize = Math.hypot(transform[2] || 0, transform[3] || 0)
+        const widthPt = Number(item.width) || 0
+        if (!Number.isFinite(fontSize) || fontSize < 1 || !Number.isFinite(widthPt) || widthPt <= 0) return
+        const matrix = pdfjs.Util.transform(viewport.transform, transform)
+        const angle = Math.atan2(matrix[1], matrix[0]) * 180 / Math.PI
+        if (Math.abs(angle) > 1) return
+        const baseline = viewport.convertToViewportPoint(transform[4], transform[5])
+        const style = textContent.styles?.[item.fontName] || {}
+        const ascent = Math.max(0.55, Math.min(1.15, Number(style.ascent) || 0.82))
+        const descent = Math.max(0, Math.min(0.5, Math.abs(Number(style.descent) || 0.22)))
+        let font = null
+        try { if (page.commonObjs.has(item.fontName)) font = page.commonObjs.get(item.fontName) } catch {}
+        const box = {
+          text: item.str,
+          x: baseline[0] / 72,
+          y: (baseline[1] - fontSize * ascent) / 72,
+          w: widthPt / 72,
+          h: fontSize * (ascent + descent) / 72,
+          fontSize,
+          color: textColors[index]?.color && /^#[\da-f]{6}$/i.test(textColors[index].color) ? textColors[index].color.slice(1) : '111111',
+          ...pdfTextStyle(item, style, font),
+        }
+        if (box.x < 0 || box.y < 0 || box.x + box.w > viewport.width / 72 || box.y + box.h > viewport.height / 72) return
+        const eraseX = Math.max(0, box.x * 72 - 1.5)
+        const eraseY = Math.max(0, box.y * 72 - 1)
+        const eraseW = Math.min(viewport.width - eraseX, box.w * 72 + 3)
+        const eraseH = Math.min(viewport.height - eraseY, box.h * 72 + 2)
+        const fill = samplePageBackground(pagePixels, canvas.width, canvas.height, eraseX, eraseY, eraseW, eraseH, 2)
+        if (fill) masks.push({ x: eraseX * 2, y: eraseY * 2, w: eraseW * 2, h: eraseH * 2, fill })
+        editableTexts.push(box)
+      })
+      const context = canvas.getContext('2d')
+      for (const mask of masks) { context.fillStyle = mask.fill; context.fillRect(mask.x, mask.y, mask.w, mask.h) }
+      const data = canvasPngDataUrl(canvas)
+      const slide = pptx.addSlide()
+      slide.background = { color: 'FFFFFF' }
+      const imageWidth = viewport.width / 72
+      const imageHeight = viewport.height / 72
+      const scale = Math.min(slideWidth / imageWidth, slideHeight / imageHeight)
+      const width = imageWidth * scale
+      const height = imageHeight * scale
+      const offsetX = (slideWidth - width) / 2
+      const offsetY = (slideHeight - height) / 2
+      slide.addImage({ data, x: offsetX, y: offsetY, w: width, h: height })
+      for (const text of editableTexts) {
+        slide.addText(text.text, {
+          x: offsetX + text.x * scale, y: offsetY + text.y * scale,
+          w: Math.max(0.03, text.w * scale), h: Math.max(0.06, text.h * scale),
+          fontFace: text.fontFace, fontSize: text.fontSize * scale,
+          color: text.color, bold: text.bold, italic: text.italic,
+          margin: 0, breakLine: false, valign: 'mid', fit: 'shrink',
+          transparency: 0,
+        })
+      }
+      progress(onProgress, pageNumber / doc.numPages, `Converted page ${pageNumber} of ${doc.numPages}; ${editableTexts.length} editable text items`)
+    }
+    const bytes = await pptx.write({ outputType: 'uint8array', compression: true })
+    const result = output(`${baseName(file)}.pptx`, bytes, PPTX_MIME)
+    result.message = 'PDF text is editable in PowerPoint. Page artwork and complex vector objects remain as a page image.'
+    return [result]
   }
 
-  if (toolId === 'excel-to-pdf') {
-    if (!file) fail('Choose an .xlsx or .csv spreadsheet first.')
-    const XLSX = await import('xlsx')
-    const workbook = XLSX.read(await readFile(file), { type: 'array' })
-    const pages = workbook.SheetNames.map((sheetName) => {
-      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false })
-      return [sheetName, ...rows.map((row) => row.map((v) => String(v ?? '')).join('  |  '))]
-    }).filter((lines) => lines.length > 1)
-    if (!pages.length) fail('No non-empty worksheet data was found.')
-    const result = await textPdf(pages, `${baseName(file)}.pdf`, options)
-    result.message = 'Basic text-only export. Cell formatting, formulas, charts, images, print areas, and sheet sizing are not preserved.'
-    return [result]
+  if (toolId === 'powerpoint-to-pdf') {
+    if (!file) fail('Choose a PowerPoint presentation first.')
+    if (/\.ppt$/i.test(file.name || '')) fail('Legacy .ppt files are not supported by the local renderer. Open the presentation in PowerPoint or LibreOffice and save it as .pptx, then try again.')
+    if (!/\.pptx$/i.test(file.name || '') && file.type !== PPTX_MIME) fail('Choose a .pptx presentation. Legacy .ppt files must first be saved as .pptx.')
+    let renderer
+    try {
+      const { PptxRenderer } = await import('pptx-browser')
+      renderer = new PptxRenderer()
+      await renderer.load(file, (fraction, message) => progress(onProgress, fraction * 0.2, message))
+      if (!renderer.slideCount) fail('No slides were found in this presentation.')
+      const pdfBytes = await renderer.toPdf({ width: 1920, quality: 0.92, onProgress: (done, total) => progress(onProgress, 0.2 + done / total * 0.8, `Rendered slide ${done} of ${total}`) })
+      return [output(`${baseName(file)}.pdf`, pdfBytes)]
+    } catch (error) {
+      throw new Error(`Could not convert this PowerPoint presentation: ${error.message}`)
+    } finally {
+      renderer?.destroy()
+    }
   }
 
   const unsupported = {
@@ -824,14 +1387,35 @@ async function processKnown(toolId, files, options, onProgress) {
  * page-numbers: startNumber/startAt, format ('{n}' tokens {n}/{total}), position, fontSize, pages
  * pdf-to-jpg: dpi (72..300), quality (0..1), format ('jpg'|'png')
  * jpg-to-pdf: pageSize ('a4'|'letter'|image-sized), marginPt
- * compress-pdf: level ('extreme'|'recommended'|'light'), dpi, quality
+ * compress-pdf: level ('lossless'|'extreme'|'recommended'|'light'), quality
  * redact-pdf: redactions [{page, x, y, width, height, normalized?}], dpi
- * word-to-pdf/excel-to-pdf: fontSize
+ * word-to-pdf: fontSize
  */
-export async function processTool({ toolId, files = [], options = {}, onProgress } = {}) {
+export async function processTool({ toolId, files = [], options = {}, onProgress, signal } = {}) {
   if (!toolId) fail('Choose a PDF tool first.')
+  if (files.length > 20) fail('Choose no more than 20 files per operation.')
+  if (files.reduce((sum, file) => sum + (Number(file?.size) || 0), 0) > 1024 * 1024 * 1024) fail('The selected files total more than 1 GB. Process a smaller batch at a time.')
   try {
-    const outputs = await processKnown(toolId, files, options || {}, onProgress)
+    const reportProgress = (state) => {
+      if (signal?.aborted) throw new DOMException('Operation canceled.', 'AbortError')
+      onProgress?.(state)
+    }
+    const aggregateInput = ['merge-pdf', 'jpg-to-pdf'].includes(toolId)
+    let outputs
+    if (signal?.aborted) throw new DOMException('Operation canceled.', 'AbortError')
+    if (aggregateInput || files.length < 2) outputs = await processKnown(toolId, files, {...options,signal}, reportProgress)
+    else {
+      outputs = []
+      for (let index = 0; index < files.length; index += 1) {
+        if (signal?.aborted) throw new DOMException('Operation canceled.', 'AbortError')
+        const result = await processKnown(toolId, [files[index]], {...options,signal}, (state) => reportProgress({
+          ...state,
+          value: (index + (Number(state?.value) || 0)) / files.length,
+          message: `Document ${index + 1} of ${files.length}: ${state?.message || 'Processing…'}`,
+        }))
+        outputs.push(...result)
+      }
+    }
     return { outputs, message: outputs.find((item) => item.message)?.message }
   } catch (error) {
     if (error instanceof Error) throw error
@@ -841,31 +1425,482 @@ export async function processTool({ toolId, files = [], options = {}, onProgress
 
 /** Read the file name, byte size, page count, and page dimensions from a real PDF. */
 export async function inspectPdf(file) {
-  const bytes = await readFile(file)
-  const doc = await getPdfJsDocument(bytes)
+  const size = file?.size || (await readFile(file)).byteLength
+  const doc = await getPdfJsDocument(file)
   const pages = []
   for (let n = 1; n <= doc.numPages; n += 1) {
     const page = await doc.getPage(n)
     const { width, height } = page.getViewport({ scale: 1 })
     pages.push({ pageNumber: n, width, height, rotation: page.rotate })
+    page.cleanup()
   }
-  return { name: file.name || 'document.pdf', size: bytes.byteLength, pageCount: doc.numPages, pages }
+  return { name: file.name || 'document.pdf', size, pageCount: doc.numPages, pages }
 }
 
-/** Render one PDF page into a supplied canvas for interactive page tools. */
-export async function renderPdfPage(file, pageNumber, canvas, scale = 1) {
+/** Openable metadata only. Page geometry after page one is resolved on demand by the viewer. */
+export async function inspectPdfOverview(file) {
+  const size = file?.size || (await readFile(file)).byteLength
+  const doc = await getPdfJsDocument(file)
+  const firstPage = await doc.getPage(1)
+  const { width, height } = firstPage.getViewport({ scale: 1 })
+  const first = { pageNumber: 1, width, height, rotation: firstPage.rotate }
+  firstPage.cleanup()
+  return { name: file.name || 'document.pdf', size, pageCount: doc.numPages, pages: [first] }
+}
+
+/** Resolve only the requested page dimensions, leaving the rest of a large document lazy. */
+export async function inspectPdfPageSize(file, pageNumber, rotation = 0) {
   const doc = await getPdfJsDocument(file)
   const number = Number(pageNumber)
   if (!Number.isInteger(number) || number < 1 || number > doc.numPages) fail(`Choose a page between 1 and ${doc.numPages}.`)
   const page = await doc.getPage(number)
-  const viewport = page.getViewport({ scale: Math.max(0.5, Math.min(2, Number(scale) || 1)) })
-  canvas.width = Math.ceil(viewport.width)
-  canvas.height = Math.ceil(viewport.height)
-  const context = canvas.getContext('2d', { alpha: false })
-  context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
-  await page.render({ canvas, canvasContext: context, viewport }).promise
-  return { width: canvas.width, height: canvas.height, pageCount: doc.numPages }
+  const viewport = page.getViewport({ scale: 1, rotation: page.rotate + (Number(rotation) || 0) })
+  const result = { pageNumber: number, width: viewport.width, height: viewport.height, rotation: ((page.rotate + (Number(rotation) || 0)) % 360 + 360) % 360 }
+  page.cleanup()
+  return result
+}
+
+/** Canvas jobs own a version, task and staging surface. Only the current job
+ * may publish pixels. Abort never releases a different job's canvas/task. */
+export async function renderPdfPage(file, pageNumber, canvas, scale = 1, renderOptions = {}) {
+  if (!canvas) return { status: 'FAILED', error: new Error('PDF canvas is unavailable.') }
+  const version = (pdfCanvasRenderVersions.get(canvas) || 0) + 1
+  pdfCanvasRenderVersions.set(canvas, version)
+  cancelQueuedCanvasJob(canvas)
+  pdfCanvasRenderTasks.get(canvas)?.cancel()
+  const signal = renderOptions.signal
+  const current = () => !signal?.aborted && pdfCanvasRenderVersions.get(canvas) === version
+  const cancelled = () => ({ status: 'CANCELLED', cancelled: true })
+  const abort = () => { if (pdfCanvasRenderVersions.get(canvas) === version) cancelPdfCanvasRender(canvas) }
+  signal?.addEventListener('abort', abort, { once: true })
+  if (!current()) { signal?.removeEventListener('abort', abort); return cancelled() }
+  try {
+    return await enqueueCanvasRender(canvas, Number(renderOptions.priority) || 2, async () => {
+      let staging
+      try {
+        if (!current()) return cancelled()
+        const doc = await getPdfJsDocument(file)
+        if (!current()) return cancelled()
+        const number = Number(pageNumber)
+        if (!Number.isInteger(number) || number < 1 || number > doc.numPages) fail(`Choose a page between 1 and ${doc.numPages}.`)
+        const page = await doc.getPage(number)
+        if (!current()) return cancelled()
+        const viewport = page.getViewport({ scale: Math.max(0.01, Math.min(8, Number(scale) || 1)), rotation: page.rotate + (Number(renderOptions.rotation) || 0) })
+        const deviceScale = renderOptions.thumbnail ? 1 : Math.min(2.5, Math.max(1, window.devicePixelRatio || 1))
+        const outputScale = Math.max(0.5, Math.min(deviceScale, Math.sqrt(16_000_000 / Math.max(1, viewport.width * viewport.height))))
+        staging = document.createElement('canvas')
+        staging.width = Math.max(1, Math.ceil(viewport.width * outputScale))
+        staging.height = Math.max(1, Math.ceil(viewport.height * outputScale))
+        const context = staging.getContext('2d', { alpha: false })
+        if (!context) fail('This browser could not create a canvas for PDF rendering.')
+        const task = page.render({ canvas: staging, canvasContext: context, viewport, transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0] })
+        pdfCanvasRenderTasks.set(canvas, task)
+        try { await task.promise } finally { if (pdfCanvasRenderTasks.get(canvas) === task) pdfCanvasRenderTasks.delete(canvas) }
+        if (!current()) return cancelled()
+        const outputContext = canvas.getContext('2d', { alpha: false })
+        if (!outputContext) fail('The PDF canvas was released before painting.')
+        canvas.width = staging.width
+        canvas.height = staging.height
+        outputContext.drawImage(staging, 0, 0)
+        canvas.dataset.painted = 'true'
+        return { status: 'SUCCESS', width: canvas.width, height: canvas.height, pageCount: doc.numPages, version }
+      } catch (error) {
+        if (!current() || error.name === 'RenderingCancelledException' || error.name === 'AbortError') return cancelled()
+        return { status: 'FAILED', error }
+      } finally {
+        if (staging) { staging.width = 0; staging.height = 0 }
+      }
+    })
+  } finally { signal?.removeEventListener('abort', abort) }
+}
+
+export function cancelPdfCanvasRender(canvas) {
+  if (!canvas) return
+  pdfCanvasRenderVersions.set(canvas, (pdfCanvasRenderVersions.get(canvas) || 0) + 1)
+  cancelQueuedCanvasJob(canvas)
+  pdfCanvasRenderTasks.get(canvas)?.cancel()
+  pdfCanvasRenderTasks.delete(canvas)
+}
+
+/** Build selectable text in an owned staging container; stale tasks cannot
+ * repopulate or clear the current layer, even during asynchronous loading. */
+export async function renderPdfTextLayer(file, pageNumber, container, scale = 1, renderOptions = {}) {
+  if (!container) return { status: 'FAILED', error: new Error('Text layer is unavailable.') }
+  const version = (pdfTextLayerVersions.get(container) || 0) + 1
+  pdfTextLayerVersions.set(container, version)
+  pdfTextLayerTasks.get(container)?.cancel()
+  const signal = renderOptions.signal
+  const current = () => !signal?.aborted && pdfTextLayerVersions.get(container) === version
+  const abort = () => { if (pdfTextLayerVersions.get(container) === version) cancelPdfTextLayer(container) }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    if (!current()) return { status: 'CANCELLED' }
+    const doc = await getPdfJsDocument(file)
+    if (!current()) return { status: 'CANCELLED' }
+    const page = await doc.getPage(Number(pageNumber))
+    const viewport = page.getViewport({ scale: Math.max(0.15, Math.min(8, Number(scale) || 1)), rotation: page.rotate + (Number(renderOptions.rotation) || 0) })
+    const textContent = await page.getTextContent()
+    const textColors = extractTextColorStyles(await page.getOperatorList(), pdfjs.OPS, textContent.items)
+    if (!current()) return { status: 'CANCELLED' }
+    const staging = document.createElement('div')
+    const textLayer = new pdfjs.TextLayer({ textContentSource: textContent, container: staging, viewport })
+    pdfTextLayerTasks.set(container, textLayer)
+    try { await textLayer.render() } finally { if (pdfTextLayerTasks.get(container) === textLayer) pdfTextLayerTasks.delete(container) }
+    if (!current()) return { status: 'CANCELLED' }
+    // PDF.js also sets unrotated layer dimensions and main rotation. Publish
+    // those with the children; dropping them misplaces selection on rotated pages.
+    container.style.cssText = staging.style.cssText
+    container.dataset.mainRotation = staging.dataset.mainRotation || '0'
+    container.dataset.renderWidth = String(viewport.width)
+    container.dataset.renderHeight = String(viewport.height)
+    container.style.setProperty('--total-scale-factor', viewport.scale * (page.userUnit || 1))
+    container.style.setProperty('--scale-round-x', '1px')
+    container.style.setProperty('--scale-round-y', '1px')
+    container.replaceChildren(...staging.childNodes)
+    pdfTextLayerMetadata.set(container, { page, items: textContent.items, colors: textColors, textDivs: textLayer.textDivs, viewport })
+    hydratePdfTextLayerStyles(container)
+    return { status: 'SUCCESS', width: viewport.width, height: viewport.height }
+  } catch (error) {
+    if (!current() || error.name === 'AbortError' || error.name === 'AbortException') return { status: 'CANCELLED' }
+    return { status: 'FAILED', error }
+  } finally { signal?.removeEventListener('abort', abort) }
+}
+
+export function cancelPdfTextLayer(container) {
+  if (!container) return
+  pdfTextLayerVersions.set(container, (pdfTextLayerVersions.get(container) || 0) + 1)
+  pdfTextLayerTasks.get(container)?.cancel()
+  pdfTextLayerTasks.delete(container)
+  pdfTextLayerMetadata.delete(container)
+}
+
+/** Return local PDF text for one page, cached for the lifetime of its File object. */
+async function getSearchablePage(file, pageNumber) {
+  let pages = pdfTextPageCache.get(file)
+  if (!pages) { pages = new Map(); pdfTextPageCache.set(file, pages) }
+  if (pages.has(pageNumber)) {
+    const cached = pages.get(pageNumber)
+    pages.delete(pageNumber)
+    pages.set(pageNumber, cached)
+    return cached
+  }
+  const doc = await getPdfJsDocument(file)
+  const page = await doc.getPage(pageNumber)
+  const viewport = page.getViewport({ scale: 1 })
+  const content = await page.getTextContent()
+  let text = ''
+  const items = []
+  for (const item of content.items || []) {
+    if (!item.str) continue
+    const separator = text ? (items.at(-1)?.hasEOL ? '\n' : ' ') : ''
+    text += separator
+    const start = text.length
+    text += item.str
+    const transform = item.transform || [1, 0, 0, 1, 0, 0]
+    const [x, baseline] = viewport.convertToViewportPoint(transform[4], transform[5])
+    const height = Math.max(1, Number(item.height) || Math.hypot(transform[2] || 0, transform[3] || 0) || 10)
+    const width = Math.max(1, Number(item.width) || height * Math.max(1, item.str.length) * 0.45)
+    items.push({ start, end: text.length, text: item.str, x, y: baseline - height, width, height, hasEOL: Boolean(item.hasEOL) })
+  }
+  const result = { text, items, width: viewport.width, height: viewport.height }
+  pages.set(pageNumber, result)
+  while (pages.size > 48) pages.delete(pages.keys().next().value)
+  page.cleanup()
+  return result
+}
+
+function getIndexedSearchText(file, pageNumber) {
+  const index = pdfSearchTextCache.get(file)
+  if (!index?.pages.has(pageNumber)) return null
+  const text = index.pages.get(pageNumber)
+  index.pages.delete(pageNumber)
+  index.pages.set(pageNumber, text)
+  return text
+}
+
+function rememberIndexedSearchText(file, pageNumber, text) {
+  let index = pdfSearchTextCache.get(file)
+  if (!index) { index = { pages: new Map(), bytes: 0 }; pdfSearchTextCache.set(file, index) }
+  if (index.pages.has(pageNumber)) index.bytes -= index.pages.get(pageNumber).length * 2
+  index.pages.delete(pageNumber)
+  index.pages.set(pageNumber, text)
+  index.bytes += text.length * 2
+  while (index.bytes > 32 * 1024 * 1024 && index.pages.size > 1) {
+    const [oldestPage, oldestText] = index.pages.entries().next().value
+    index.pages.delete(oldestPage)
+    index.bytes -= oldestText.length * 2
+  }
+}
+
+/** Search progressively through local document text; repeated queries reuse page extraction. */
+export async function searchPdfDocument(file, query, options = {}) {
+  const value = String(query || '')
+  if (!value) return { results: [], indexedPages: 0, pageCount: 0 }
+  const doc = await getPdfJsDocument(file)
+  const searchKey = JSON.stringify([value, Boolean(options.caseSensitive), Boolean(options.wholeWord), Boolean(options.regex)])
+  let resultCache = pdfSearchResultCache.get(file)
+  const candidatePages = options.candidatePages == null ? null : [...new Set(options.candidatePages.map(Number).filter((page) => Number.isInteger(page) && page >= 1 && page <= doc.numPages))]
+  if (!candidatePages && resultCache?.has(searchKey)) {
+    const cached = resultCache.get(searchKey)
+    resultCache.delete(searchKey)
+    resultCache.set(searchKey, cached)
+    return cached
+  }
+  const flags = options.caseSensitive ? 'gu' : 'giu'
+  let source
+  try {
+    const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    source = options.regex ? value : escaped
+    if (options.wholeWord) source = `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])`
+    var matcher = new RegExp(source, flags)
+  } catch (error) { throw new Error(`Invalid search pattern: ${error.message}`) }
+  const results = []
+  const pagesToSearch = candidatePages || Array.from({ length: doc.numPages }, (_, index) => index + 1)
+  for (const pageNumber of pagesToSearch) {
+    if (options.signal?.aborted) throw new DOMException('Search canceled.', 'AbortError')
+    let pageText = getIndexedSearchText(file, pageNumber)
+    let page = pdfTextPageCache.get(file)?.get(pageNumber) || null
+    if (pageText == null) {
+      page = await getSearchablePage(file, pageNumber)
+      pageText = page.text
+      rememberIndexedSearchText(file, pageNumber, pageText)
+    }
+    matcher.lastIndex = 0
+    let match
+    const pageMatches = []
+    while ((match = matcher.exec(pageText)) !== null) {
+      if (!match[0]) { matcher.lastIndex += 1; continue }
+      const from = match.index, to = from + match[0].length
+      pageMatches.push({ text: match[0], from, to })
+    }
+    if (pageMatches.length && !page) page = await getSearchablePage(file, pageNumber)
+    for (const pageMatch of pageMatches) {
+      const boxes = page.items.filter((item) => item.end > pageMatch.from && item.start < pageMatch.to).map((item) => {
+        const segmentStart = Math.max(pageMatch.from, item.start) - item.start
+        const segmentEnd = Math.min(pageMatch.to, item.end) - item.start
+        const unit = item.width / Math.max(item.text.length, 1)
+        return { x: (item.x + segmentStart * unit) / page.width, y: item.y / page.height, width: Math.max(0.003, (segmentEnd - segmentStart) * unit / page.width), height: Math.max(0.004, item.height / page.height) }
+      })
+      const contextStart = Math.max(0, pageMatch.from - 42)
+      const contextEnd = Math.min(pageText.length, pageMatch.to + 42)
+      results.push({ page: pageNumber, text: pageMatch.text, start: pageMatch.from, end: pageMatch.to, context: pageText.slice(contextStart, contextEnd).replace(/\s+/g, ' ').trim(), rects: boxes })
+    }
+    options.onProgress?.({ page: pageNumber, total: doc.numPages })
+    if (results.length % 4 === 0 || pageNumber % 4 === 0) await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  const response = { results, indexedPages: candidatePages ? candidatePages.length : doc.numPages, pageCount: doc.numPages }
+  if (!candidatePages && results.length <= 10_000) {
+    resultCache ||= new Map()
+    resultCache.set(searchKey, response)
+    while (resultCache.size > 8) resultCache.delete(resultCache.keys().next().value)
+    pdfSearchResultCache.set(file, resultCache)
+  }
+  return response
+}
+
+/** Read the PDF outline without blocking initial document display. */
+export async function getPdfOutline(file) {
+  const cached = pdfOutlineCache.get(file)
+  if (cached) return cached
+  const pending = (async () => {
+    const doc = await getPdfJsDocument(file)
+    const outline = await doc.getOutline()
+    const rows = []
+    const visit = async (items, depth = 0) => {
+      for (const item of items || []) {
+        let page = null
+        try {
+          const destination = typeof item.dest === 'string' ? await doc.getDestination(item.dest) : item.dest
+          if (Array.isArray(destination) && destination[0]) page = (await doc.getPageIndex(destination[0])) + 1
+        } catch { /* Keep outline entries even when the destination is malformed. */ }
+        rows.push({ title: item.title || 'Untitled bookmark', page, depth, url: item.url || null })
+        if (item.items?.length) await visit(item.items, depth + 1)
+      }
+    }
+    await visit(outline)
+    return rows
+  })()
+  pdfOutlineCache.set(file, pending)
+  try { return await pending } catch (error) { pdfOutlineCache.delete(file); throw error }
+}
+
+/** Return link hit rectangles and local destinations for one requested page. */
+export async function inspectPdfPageLinks(file, pageNumber, rotation = 0) {
+  let byPage = pdfLinkCache.get(file)
+  if (!byPage) { byPage = new Map(); pdfLinkCache.set(file, byPage) }
+  const cacheKey = `${pageNumber}:${Number(rotation) || 0}`
+  if (byPage.has(cacheKey)) return byPage.get(cacheKey)
+  const doc = await getPdfJsDocument(file)
+  const page = await doc.getPage(pageNumber)
+  const viewport = page.getViewport({ scale: 1, rotation: page.rotate + (Number(rotation) || 0) })
+  const annotations = await page.getAnnotations({ intent: 'display' })
+  const links = []
+  for (const annotation of annotations || []) {
+    if (annotation.subtype !== 'Link' || !Array.isArray(annotation.rect)) continue
+    const first = viewport.convertToViewportPoint(annotation.rect[0], annotation.rect[1])
+    const second = viewport.convertToViewportPoint(annotation.rect[2], annotation.rect[3])
+    const bounds = [first[0], first[1], second[0], second[1]]
+    const left = Math.min(bounds[0], bounds[2]), top = Math.min(bounds[1], bounds[3])
+    const right = Math.max(bounds[0], bounds[2]), bottom = Math.max(bounds[1], bounds[3])
+    let destinationPage = null
+    try {
+      const destination = typeof annotation.dest === 'string' ? await doc.getDestination(annotation.dest) : annotation.dest
+      if (Array.isArray(destination) && destination[0]) destinationPage = (await doc.getPageIndex(destination[0])) + 1
+    } catch { /* Keep an unresolved link as a no-op link region. */ }
+    links.push({ x: left / viewport.width, y: top / viewport.height, width: (right - left) / viewport.width, height: (bottom - top) / viewport.height, url: annotation.url || null, destinationPage, title: annotation.title || annotation.url || 'PDF link' })
+  }
+  byPage.set(cacheKey, links)
+  page.cleanup()
+  return links
+}
+
+/** Return positioned native AcroForm widgets for the visible-page interaction layer. */
+export async function inspectPdfPageFormFields(file, pageNumber, rotation = 0) {
+  let byPage = pdfFormWidgetCache.get(file)
+  if (!byPage) { byPage = new Map(); pdfFormWidgetCache.set(file, byPage) }
+  const cacheKey = `${pageNumber}:${Number(rotation) || 0}`
+  if (byPage.has(cacheKey)) return byPage.get(cacheKey)
+  const doc = await getPdfJsDocument(file)
+  const page = await doc.getPage(pageNumber)
+  const viewport = page.getViewport({ scale: 1, rotation: page.rotate + (Number(rotation) || 0) })
+  const annotations = await page.getAnnotations({ intent: 'display' })
+  const fields = []
+  for (const annotation of annotations || []) {
+    if (annotation.subtype !== 'Widget' || !Array.isArray(annotation.rect) || !annotation.fieldName || annotation.hidden) continue
+    const first = viewport.convertToViewportPoint(annotation.rect[0], annotation.rect[1])
+    const second = viewport.convertToViewportPoint(annotation.rect[2], annotation.rect[3])
+    const bounds = [first[0], first[1], second[0], second[1]]
+    const left = Math.min(bounds[0], bounds[2]), top = Math.min(bounds[1], bounds[3])
+    const right = Math.max(bounds[0], bounds[2]), bottom = Math.max(bounds[1], bounds[3])
+    const choices = Array.isArray(annotation.options)
+      ? annotation.options.map((choice) => typeof choice === 'string' ? { label: choice, value: choice } : { label: choice?.displayValue ?? choice?.exportValue ?? '', value: choice?.exportValue ?? choice?.displayValue ?? '' })
+      : []
+    const fieldFlags = Number(annotation.fieldFlags) || 0
+    fields.push({
+      key: annotation.id || `${annotation.fieldName}-${fields.length}`,
+      name: annotation.fieldName,
+      type: annotation.fieldType || '',
+      value: annotation.fieldValue ?? '',
+      radioValue: annotation.radioButtonValue ?? annotation.buttonValue ?? '',
+      choices,
+      combo: Boolean(annotation.combo),
+      multiSelect: Boolean(annotation.multiSelect),
+      fontSize: Number(annotation.defaultAppearanceData?.fontSize) || 0,
+      readOnly: Boolean(annotation.readOnly),
+      required: Boolean(annotation.required),
+      multiline: Boolean(annotation.multiline || (fieldFlags & (1 << 12))),
+      password: Boolean(annotation.password),
+      checkBox: Boolean(annotation.checkBox),
+      radioButton: Boolean(annotation.radioButton),
+      comb: Boolean(annotation.comb || (fieldFlags & (1 << 24))),
+      x: left / viewport.width,
+      y: top / viewport.height,
+      width: (right - left) / viewport.width,
+      height: (bottom - top) / viewport.height,
+    })
+  }
+  byPage.set(cacheKey, fields)
+  page.cleanup()
+  return fields
+}
+
+/** Return PDF image paint bounds in normalized top-left page coordinates. */
+export async function inspectPdfPageImages(file, pageNumber, rotation = 0) {
+  const doc = await getPdfJsDocument(file)
+  const number = Number(pageNumber)
+  if (!Number.isInteger(number) || number < 1 || number > doc.numPages) fail(`Choose a page between 1 and ${doc.numPages}.`)
+  const page = await doc.getPage(number)
+  const viewport = page.getViewport({ scale: 1, rotation: page.rotate + rotation })
+  const operators = await page.getOperatorList()
+  const { OPS } = pdfjs
+  const imageOps = new Set([OPS.paintImageMaskXObject, OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageXObjectRepeat, OPS.paintInlineImageXObjectGroup, OPS.paintImageMaskXObjectGroup, OPS.paintImageMaskXObjectRepeat])
+  const multiply = (left, right) => [
+    left[0] * right[0] + left[2] * right[1], left[1] * right[0] + left[3] * right[1],
+    left[0] * right[2] + left[2] * right[3], left[1] * right[2] + left[3] * right[3],
+    left[0] * right[4] + left[2] * right[5] + left[4], left[1] * right[4] + left[3] * right[5] + left[5],
+  ]
+  const point = (matrix, x, y) => ({ x: matrix[0] * x + matrix[2] * y + matrix[4], y: matrix[1] * x + matrix[3] * y + matrix[5] })
+  let transform = [1, 0, 0, 1, 0, 0]
+  const stack = []
+  const images = []
+  for (let index = 0; index < operators.fnArray.length; index += 1) {
+    const operation = operators.fnArray[index]
+    const args = operators.argsArray[index] || []
+    if (operation === OPS.save) stack.push(transform)
+    else if (operation === OPS.restore) transform = stack.pop() || transform
+    else if (operation === OPS.transform && args.length >= 6) transform = multiply(transform, args.slice(0, 6))
+    else if (imageOps.has(operation)) {
+      const combined = multiply(viewport.transform, transform)
+      const corners = [point(combined, 0, 0), point(combined, 1, 0), point(combined, 0, 1), point(combined, 1, 1)]
+      const left = Math.max(0, Math.min(...corners.map((corner) => corner.x)))
+      const top = Math.max(0, Math.min(...corners.map((corner) => corner.y)))
+      const right = Math.min(viewport.width, Math.max(...corners.map((corner) => corner.x)))
+      const bottom = Math.min(viewport.height, Math.max(...corners.map((corner) => corner.y)))
+      if (right - left > 2 && bottom - top > 2) images.push({ key: `image-${images.length}`, x: left / viewport.width, y: top / viewport.height, width: (right - left) / viewport.width, height: (bottom - top) / viewport.height,
+        imageTransform: combined.map((n,i)=>n/(i%2?viewport.height:viewport.width)),
+        sourceWidth: Number(args[1]) || null, sourceHeight: Number(args[2]) || null,
+        complexTransform: Math.abs(combined[0]*combined[2]+combined[1]*combined[3]) > .01 })
+    }
+  }
+  return images
+}
+
+export function hydratePdfTextLayerStyles(container) {
+  const metadata = pdfTextLayerMetadata.get(container)
+  if (!metadata) return
+  const { page, items, textDivs, viewport, colors } = metadata
+  let divIndex = 0
+  for (const [itemIndex, item] of items.entries()) {
+    if (item.str === undefined) continue
+    const textDiv = textDivs[divIndex++]
+    if (!textDiv || !item.str) continue
+    if (colors?.[itemIndex]?.color) { textDiv.dataset.pdfColor = colors[itemIndex].color; textDiv.dataset.pdfColorRanges = JSON.stringify(colors[itemIndex].ranges) }
+    const fontSize = Math.hypot(item.transform?.[2] || 0, item.transform?.[3] || 0)
+    if (fontSize > 0) textDiv.dataset.pdfFontSize = String(fontSize)
+    if (viewport && item.transform?.length >= 6) {
+      const [baselineX, baselineY] = viewport.convertToViewportPoint(item.transform[4], item.transform[5])
+      textDiv.dataset.pdfBaselineX = String(baselineX)
+      textDiv.dataset.pdfRotation = String(((Number.parseFloat(textDiv.style.getPropertyValue('--rotate')) || 0) + viewport.rotation + 360) % 360)
+      textDiv.dataset.pdfBaselineY = String(baselineY)
+    }
+    try {
+      const font = page.commonObjs.has(item.fontName) ? page.commonObjs.get(item.fontName) : null
+      if (!font) continue
+      textDiv.dataset.pdfFontSourceName = font.name || ''
+      textDiv.dataset.pdfFontWeight = font.bold || font.black || Number(font.cssFontInfo?.fontWeight) >= 600 || /bold|black|heavy|demi|semibold/i.test(font.name || '') ? '700' : '400'
+      const fontNames = `${font.name || ''} ${font.loadedName || ''} ${font.fallbackName || ''} ${font.cssFontInfo?.fontFamily || ''}`.toLowerCase()
+      const italicAngle = Number.parseFloat(font.cssFontInfo?.italicAngle)
+      const cssFontStyle = window.getComputedStyle(textDiv).fontStyle
+      const [a = 0, b = 0, c = 0, d = 0] = item.transform || []
+      const horizontalLength = Math.hypot(a, b)
+      const verticalLength = Math.hypot(c, d)
+      const normalizedShear = horizontalLength && verticalLength ? Math.abs((a * c + b * d) / (horizontalLength * verticalLength)) : 0
+      const hasItalicStyle = Boolean(font.italic)
+        || (Number.isFinite(italicAngle) && Math.abs(italicAngle) > 0.01)
+        || /italic|oblique|slanted/i.test(fontNames)
+        || /italic|oblique/i.test(cssFontStyle)
+        // Some PDFs simulate italics by shearing text instead of using an italic font.
+        || normalizedShear > 0.025
+      textDiv.dataset.pdfFontStyle = hasItalicStyle ? 'italic' : 'normal'
+      if (horizontalLength > 0) textDiv.dataset.pdfFontScaleX = String(horizontalLength)
+      if (typeof item.width === "number") textDiv.dataset.pdfWidth = String(item.width)
+      const rawFontName = String(font.name || font.loadedName || font.cssFontInfo?.fontFamily || "")
+      const resolved = resolveFontFamilyStack(rawFontName, font.fallbackName)
+      textDiv.dataset.pdfFontFamily = resolved.family
+      textDiv.dataset.pdfPreviewFontFamily = font.loadedName ? `"${font.loadedName}", ${resolved.cssStack}` : resolved.cssStack
+      textDiv.dataset.pdfFontCssStack = resolved.cssStack
+    } catch {}
+  }
+}
+
+/** Render a compact page thumbnail for the document page rail. */
+export async function renderPdfThumbnail(file, pageNumber, canvas, targetWidth = 168, priority = 5, renderOptions = {}) {
+  if (renderOptions.signal?.aborted) return { status: 'CANCELLED' }
+  try {
+    const size = await inspectPdfPageSize(file, pageNumber)
+    if (renderOptions.signal?.aborted) return { status: 'CANCELLED' }
+    return renderPdfPage(file, pageNumber, canvas, Math.min(1, targetWidth / size.width), { ...renderOptions, priority, thumbnail: true })
+  } catch (error) { return renderOptions.signal?.aborted ? { status: 'CANCELLED' } : { status: 'FAILED', error } }
 }
 
 /** Return AcroForm field details that can be edited in the Fill Forms tool. */
@@ -903,3 +1938,9 @@ export async function createDocument({ pageSize = 'a4', orientation = 'portrait'
   if (title) pdf.setTitle(String(title))
   return savePdf(pdf)
 }
+
+export async function unlockEditorPdf(file) { const toolkit=await getQpdfToolkit(); const data=await toolkit.unlock(await readFile(file),{password:file.pdfPassword});return new File([data],file.name,{type:PDF_MIME}) }
+
+export async function encryptEditorPdf(file,password) {const toolkit=await getQpdfToolkit();return new File([await toolkit.lock(await readFile(file),{userPassword:password,ownerPassword:password,keyLength:256})],file.name,{type:PDF_MIME})}
+
+export async function detectPdfFormFields(file,pageNumber,rotation=0) {const doc=await getPdfJsDocument(file),page=await doc.getPage(pageNumber),viewport=page.getViewport({scale:1,rotation:page.rotate+rotation});const text=await page.getTextContent();return detectTextFormCandidates(text.items,viewport).map(candidate=>({...candidate,page:pageNumber,viewerRotation:rotation}))}

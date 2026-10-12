@@ -7,28 +7,46 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http://127.0.0.1:5174 && node scripts/launch-electron.cjs\"",
-    "build": "vite build"
+    "build": "vite build",
+    "check": "npm run build",
+    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && npm run test:repairs",
+    "test:repairs": "node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "^5.3.0",
+    "@fontsource/dm-sans": "^5.3.0",
+    "@fontsource/fredoka": "^5.3.0",
+    "@fontsource/geist": "^5.3.0",
+    "@fontsource/geist-mono": "^5.3.0",
+    "@fontsource/noto-sans-devanagari": "^5.3.0",
+    "@fontsource/nunito-sans": "^5.3.0",
+    "@fontsource/outfit": "^5.3.0",
+    "@pdf-lib/fontkit": "^1.1.1",
     "docx": "^9.8.1",
+    "docx-preview": "0.4.1",
     "mammoth": "^1.13.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
     "pdfstudio": "^0.4.0",
+    "pptx-browser": "^4.1.5",
+    "pptxgenjs": "^4.0.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "tesseract.js": "^7.0.0",
-    "xlsx": "^0.18.5"
+    "regenerator-runtime": "^0.14.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
-    "concurrently": "^9.2.0",
-    "electron": "^38.1.2",
+    "concurrently": "^9.2.4",
+    "electron": "^44.5.1",
     "vite": "^7.1.7",
     "wait-on": "^8.0.4"
   },
   "allowScripts": {
-    "electron@38.8.6": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "electron@44.5.1": true
+  },
+  "overrides": {
+    "shell-quote": "^1.12.0"
   }
 }

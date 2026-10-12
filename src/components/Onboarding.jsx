@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
 import { Icon } from '../icons'
 import { THEMES, isLightTheme } from '../themes'
+import { Presence } from './Presence'
 
 const STEPS = ['Your name', 'Appearance', 'A few preferences']
 
-export function Onboarding({ theme, onSelectTheme, onFinish }) {
+export function Onboarding({ isOpen = true, theme, onSelectTheme, onFinish }) {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [matchSystem, setMatchSystem] = useState(false)
@@ -18,13 +19,14 @@ export function Onboarding({ theme, onSelectTheme, onFinish }) {
   })
 
   return (
-    <div className="onboarding-backdrop">
+    <Presence present={isOpen} exitDuration={300}><div className="onboarding-backdrop">
       <section
         className="onboarding-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
         onKeyDown={(event) => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(true); return }
           if (event.key !== 'Tab') return
           const focusable = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled)')]
           const first = focusable[0]
@@ -60,7 +62,7 @@ export function Onboarding({ theme, onSelectTheme, onFinish }) {
             {STEPS.map((label, index) => <span key={label} className={index <= step ? 'complete' : ''} />)}
           </div>
 
-          <div className="onboarding-step-content" key={step}>
+          <div className="onboarding-step-content">
             {step === 0 && (
               <div className="onboarding-name-step">
                 <span className="onboarding-step-icon"><Icon name="user" size={19} /></span>
@@ -156,6 +158,6 @@ export function Onboarding({ theme, onSelectTheme, onFinish }) {
           </footer>
         </div>
       </section>
-    </div>
+    </div></Presence>
   )
 }

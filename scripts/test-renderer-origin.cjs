@@ -1,0 +1,13 @@
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { isAppRendererURL } = require('../electron/rendererOrigin.cjs');
+const appDirectory = path.resolve('tmp', 'App with spaces café');
+const url = file => pathToFileURL(path.join(appDirectory, file)).href;
+assert.ok(isAppRendererURL(url('dist/index.html'), appDirectory));
+assert.ok(isAppRendererURL(`${url('dist/index.html')}?mode=qa#viewer`, appDirectory));
+for (const file of ['dist-evil/index.html', 'index.html', 'dist/../outside.html']) assert.equal(isAppRendererURL(url(file), appDirectory), false);
+assert.equal(isAppRendererURL(url('dist/index.html').replace('index.html','%2e%2e/outside.html'), appDirectory), false);
+for (const value of ['file://evil.invalid/dist/index.html', 'https://127.0.0.1:5174', 'http://127.0.0.1:5175', 'http://example.com:5174', 'garbage']) assert.equal(isAppRendererURL(value, appDirectory), false);
+assert.ok(isAppRendererURL('http://127.0.0.1:5174/', appDirectory));
+console.log('PASS renderer origin: encoded spaces/Unicode, dist boundary/traversal, remote file host, exact dev origin.');
