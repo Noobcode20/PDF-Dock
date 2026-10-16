@@ -161,6 +161,9 @@ function DocumentPreview({ record, page = 1, expanded = false, onOpenPreview, on
       </div> : null}
       {previewOverlay && createPortal(<div className={`home-preview-overlay${previewOverlay.closing ? ' is-closing' : ''}`} onClick={(event) => {
         if (event.target === event.currentTarget) onClosePreview?.()
+      }} onKeyDown={(event) => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClosePreview?.() }
+        else if (event.key === 'Enter' && !event.repeat && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); onClosePreview?.() }
       }} style={{
         '--preview-from-top': `${previewOverlay.frame.fromTop}px`,
         '--preview-from-left': `${previewOverlay.frame.fromLeft}px`,
@@ -205,7 +208,7 @@ function ConfirmDialog({ isOpen, onClose, fileName, onDelete }) {
     <Presence present={isOpen} exitDuration={180}><div className="confirm-backdrop" onClick={onClose}>
       <div className="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="remove-dialog-title" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() }
-        if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.repeat) onDelete() }
+        if (event.key === 'Enter' && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); event.stopPropagation(); if (!event.repeat) onDelete() }
         if (event.key === 'Tab') {
           const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled)')]
           if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus() }

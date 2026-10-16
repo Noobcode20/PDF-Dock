@@ -35,6 +35,13 @@ export function PropertiesDialog({ file, onClose, onCommit }) {
         className="confirm-panel"
         role="dialog"
         aria-modal="true"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+          }
+        }}
         onSubmit={async (e) => {
           e.preventDefault();
           try {

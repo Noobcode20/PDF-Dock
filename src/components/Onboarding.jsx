@@ -27,6 +27,12 @@ export function Onboarding({ isOpen = true, theme, onSelectTheme, onFinish }) {
         aria-labelledby="onboarding-title"
         onKeyDown={(event) => {
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(true); return }
+          if (event.key === 'Enter' && !event.repeat && !event.target.closest('button, input, select, textarea, a')) {
+            event.preventDefault()
+            if (step < STEPS.length - 1 && (step !== 0 || name.trim())) setStep(step + 1)
+            else if (step === STEPS.length - 1) finish()
+            return
+          }
           if (event.key !== 'Tab') return
           const focusable = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled)')]
           const first = focusable[0]

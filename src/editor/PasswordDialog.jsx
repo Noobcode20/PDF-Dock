@@ -27,6 +27,13 @@ export function PasswordDialog() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="password-title"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            answer(null);
+          }
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           answer(password);

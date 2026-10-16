@@ -362,6 +362,14 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
 
   const handleFilePickerKeyDown = (event) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setFileSelectorOpen(false); return }
+    if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
+      event.preventDefault()
+      if (filePickerBusy) return
+      const record = filteredRecentFiles[filePickerActiveIndex]
+      if (record) void openRecentFile(record)
+      else picker.current?.click()
+      return
+    }
     if (!filteredRecentFiles.length) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
@@ -369,10 +377,6 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
       setFilePickerActiveIndex((index) => event.key === 'ArrowDown'
         ? Math.min(index + 1, filteredRecentFiles.length - 1)
         : Math.max(index - 1, 0))
-    } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
-      event.preventDefault()
-      const record = filteredRecentFiles[filePickerActiveIndex]
-      if (record && !filePickerBusy) void openRecentFile(record)
     }
   }
 
@@ -689,7 +693,10 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
 
       <Presence present={Boolean(preview)} exitDuration={180}>
         {preview && <div className="palette-backdrop output-preview-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closePreview() }}>
-          <section className="output-preview-dialog" role="dialog" aria-modal="true" aria-label={`Preview ${preview.title}`} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePreview() } }}>
+          <section className="output-preview-dialog" role="dialog" aria-modal="true" aria-label={`Preview ${preview.title}`} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePreview() }
+            else if (event.key === 'Enter' && !event.repeat && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); closePreview() }
+          }}>
             <header className="output-preview-header"><strong title={preview.title}>{preview.title}</strong><button type="button" autoFocus className="palette-close-btn" aria-label="Close preview" onClick={closePreview}><kbd>Esc</kbd></button></header>
             {preview.mimeType === 'application/pdf' ? <OutputPdfPreview file={preview.file} /> : preview.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? <OutputDocxPreview data={preview.data} title={preview.title} /> : preview.mimeType.startsWith('image/') ? <div className="output-preview-image-wrap"><img className="output-preview-image" src={preview.url} alt={preview.title} /></div> : <iframe className="output-preview-frame" title={`Preview of ${preview.title}`} srcDoc={preview.html} sandbox="" />}
           </section>

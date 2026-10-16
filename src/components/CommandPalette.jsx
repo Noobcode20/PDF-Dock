@@ -91,7 +91,7 @@ export function CommandPalette({ isOpen, onClose, onSelectTool, onNavigate, onNe
 
   return (
     <Presence present={isOpen} exitDuration={200}><div className="palette-backdrop" onClick={onClose}>
-      <div className={`palette-modal ${size === 'maximized' ? 'maximized' : 'compact'} ${keyboardNavigation ? 'keyboard-nav' : ''}`} role="dialog" aria-modal="true" aria-label="Command palette" onClick={(e) => e.stopPropagation()} onMouseMove={() => setKeyboardNavigation(false)}>
+      <div className={`palette-modal ${size === 'maximized' ? 'maximized' : 'compact'} ${keyboardNavigation ? 'keyboard-nav' : ''}`} role="dialog" aria-modal="true" aria-label="Command palette" onClick={(e) => e.stopPropagation()} onMouseMove={() => setKeyboardNavigation(false)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() } }}>
         <div className="palette-search-row">
           <Icon name="search" size={18} className="palette-search-icon" />
           <input

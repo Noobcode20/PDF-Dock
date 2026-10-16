@@ -90,7 +90,7 @@ function restoreDraft(payload) {
 function UnsavedChangesDialog({ onDismiss, stage = 'file', error, onAccept, onCancel }) {
   const applying = stage === 'apply'
   return <div className="confirm-backdrop" role="presentation">
-    <section className="confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-pdf-title" aria-describedby="unsaved-pdf-message" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); onCancel() } else if (event.key === 'Enter') { event.preventDefault(); onAccept() } }}>
+    <section className="confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-pdf-title" aria-describedby="unsaved-pdf-message" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); onCancel() } else if (event.key === 'Enter' && !event.repeat && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); onAccept() } }}>
       <div className="confirm-icon"><Icon name="file" size={18} /></div>
       <h2 className="confirm-title" id="unsaved-pdf-title">{applying ? 'Unsaved PDF changes' : 'Unsaved file'}</h2>
       <p className="confirm-message" id="unsaved-pdf-message">{applying ? 'Apply your changes to this PDF in PDF King before leaving?' : 'Do you want to save your work to a file before leaving?'}</p>
