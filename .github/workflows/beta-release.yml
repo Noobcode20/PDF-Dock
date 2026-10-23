@@ -19,11 +19,9 @@ jobs:
           - platform: macOS
             runner: macos-latest
             script: package:mac
-            asset: release/**
           - platform: Windows
             runner: windows-latest
             script: package:win
-            asset: release/**
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,7 +33,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-installer
-          path: ${{ matrix.asset }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.blockmap
+            release/beta*.yml
+            release/latest*.yml
           if-no-files-found: error
 
   publish:
@@ -50,11 +54,13 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -d '' assets < <(find release -type f -print0)
+          mapfile -d '' assets < <(find release -maxdepth 1 -type f -print0)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "No installer or updater metadata files were downloaded."
             exit 1
           fi
+          test -f release/beta.yml
+          test -f release/beta-mac.yml
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" --clobber
