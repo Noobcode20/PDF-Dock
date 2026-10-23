@@ -3,6 +3,7 @@ import { Icon } from '../icons'
 import { allTools, categories } from '../toolsData'
 import { Presence } from './Presence'
 import { loadShortcuts } from '../keyboardShortcuts'
+import { recentFilesBackend } from '../recentFiles'
 
 export function CommandPalette({ isOpen, onClose, onSelectTool, onNavigate, onNewDocument, onNewWindow, onOpenPdf, onToggleTheme, onToggleSidebar, onNewTab, size = 'compact' }) {
   const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
@@ -34,14 +35,16 @@ export function CommandPalette({ isOpen, onClose, onSelectTool, onNavigate, onNe
       setKeyboardNavigation(false)
       setRecentError('')
       setTimeout(() => inputRef.current?.focus(), 50)
-      window.pdfKing?.getRecentFiles?.().then(setRecentFiles).catch(() => setRecentFiles([]))
+      Promise.resolve(recentFilesBackend().getRecentFiles?.()).then(setRecentFiles).catch(() => setRecentFiles([]))
     }
   }, [isOpen])
 
   const openRecent = async (file) => {
     try {
-      const data = await window.pdfKing?.readRecentFile?.(file.id)
-      if (!data) throw new Error('Recent file storage is only available in the desktop app.')
+      const backend = recentFilesBackend()
+      if (!backend?.readRecentFile) throw new Error('This PDF could not be opened because local file storage is unavailable.')
+      const data = await backend.readRecentFile(file.id)
+      if (!data) throw new Error('The selected recent PDF could not be read.')
       onNavigate?.({ type: 'tool', toolId: 'pdf-editor', files: [new File([data], file.name, { type: 'application/pdf' })] })
       return true
     } catch (error) { setRecentError(error.message || `Could not open ${file.name}.`); return false }
@@ -51,7 +54,7 @@ export function CommandPalette({ isOpen, onClose, onSelectTool, onNavigate, onNe
     { id: 'recent', label: 'Open Recent Files', description: 'Browse recently opened PDFs', group: 'Navigation', icon: 'file', shortcut: shortcutLabel('navigate-recent'), run: () => onNavigate?.({ type: 'recent' }) },
     { id: 'settings', label: 'Open Settings', description: 'Manage appearance, privacy, and shortcuts', group: 'Navigation', icon: 'settings', shortcut: shortcutLabel('navigate-settings'), run: () => onNavigate?.({ type: 'settings' }) },
     { id: 'new-document', label: 'Create New Document', description: 'Open a PDF or create a blank document', group: 'Actions', icon: 'plus', run: onNewDocument },
-    { id: 'new-window', label: 'New Window', description: 'Open another PDF King window', group: 'Actions', icon: 'plus', shortcut: shortcutLabel('new-window'), run: onNewWindow },
+    { id: 'new-window', label: 'New Window', description: 'Open another PDF Dock window', group: 'Actions', icon: 'plus', shortcut: shortcutLabel('new-window'), run: onNewWindow },
     { id: 'open-pdf', label: 'Open PDF', description: 'Choose a PDF from your device', group: 'Actions', icon: 'upload', shortcut: shortcutLabel('open-file'), run: onOpenPdf },
     { id: 'new-tab', label: 'New Workspace Tab', description: 'Open a fresh workspace tab', group: 'Actions', icon: 'plus', shortcut: shortcutLabel('new-tab'), run: onNewTab },
     { id: 'toggle-theme', label: 'Toggle Theme', description: 'Switch between light and dark appearance', group: 'Actions', icon: 'sun', shortcut: shortcutLabel('toggle-theme'), run: onToggleTheme },

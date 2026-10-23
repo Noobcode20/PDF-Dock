@@ -1,0 +1,57 @@
+name: PDF Dock beta release
+
+on:
+  push:
+    tags:
+      - 'v0.1.0-beta.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} installer
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-latest
+            script: package:mac
+            asset: release/*.dmg
+          - platform: Windows
+            runner: windows-latest
+            script: package:win
+            asset: release/*.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-installer
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish beta downloads
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PDF Dock $GITHUB_REF_NAME" \
+            --prerelease \
+            --notes "PDF Dock beta for macOS and Windows. Please report issues in the repository."

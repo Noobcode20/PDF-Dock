@@ -49,7 +49,7 @@ export function Onboarding({ isOpen = true, theme, onSelectTheme, onFinish }) {
         <aside className="onboarding-aside">
           <div className="onboarding-brand">
             <span className="brand-mark" aria-hidden="true"><span /><span /><span /><span /></span>
-            <strong>PDF <em>King</em></strong>
+            <strong>PDF <em>Dock</em></strong>
           </div>
           <div className="onboarding-aside-copy">
             <span className="onboarding-eyebrow">A LITTLE SETUP</span>

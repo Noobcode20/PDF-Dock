@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { Presence } from '../components/Presence'
+import { recentFilesBackend } from '../recentFiles'
 
 const formatBytes = (size) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(2)} MB`
 const relativeDate = (value) => {
@@ -46,15 +47,27 @@ export function RecentFilesPage({ onNavigate }) {
   const [pendingFile, setPendingFile] = useState(null)
 
   const refresh = async () => {
-    if (!window.pdfKing?.getRecentFiles) { setFiles([]); return }
-    try { setFiles(await window.pdfKing.getRecentFiles()) } catch { setError('Could not load local file history.') }
+    const backend = recentFilesBackend()
+    if (!backend?.getRecentFiles) { setFiles([]); return }
+    try { setFiles(await backend.getRecentFiles()) } catch { setError('Could not load local file history.') }
   }
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    void refresh()
+    const sync = () => { if (document.visibilityState === 'visible') void refresh() }
+    window.addEventListener('focus', sync)
+    document.addEventListener('visibilitychange', sync)
+    return () => {
+      window.removeEventListener('focus', sync)
+      document.removeEventListener('visibilitychange', sync)
+    }
+  }, [])
 
   const open = async (record) => {
     try {
-      const data = await window.pdfKing?.readRecentFile(record.id)
-      if (!data) throw new Error('Recent file storage is only available in the desktop app.')
+      const backend = recentFilesBackend()
+      if (!backend?.readRecentFile) throw new Error('This PDF could not be opened because local file storage is unavailable.')
+      const data = await backend.readRecentFile(record.id)
+      if (!data) throw new Error('The selected recent PDF could not be read.')
       const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath=record.sourcePath
       onNavigate({ type: 'tool', toolId: 'pdf-editor', files: [file] })
     } catch (cause) { setError(cause.message || 'Could not open this recent PDF.') }
@@ -63,9 +76,10 @@ export function RecentFilesPage({ onNavigate }) {
   const cancelEdit = () => { setConfirmOpen(false); setPendingFile(null) }
 
   const deleteFile = async () => {
-    if (!pendingFile?.id || !window.pdfKing?.removeRecentFile) return
+    const backend = recentFilesBackend()
+    if (!pendingFile?.id || !backend?.removeRecentFile) return
     try {
-      await window.pdfKing.removeRecentFile(pendingFile.id)
+      await backend.removeRecentFile(pendingFile.id)
       setFiles((current) => current.filter((f) => f.id !== pendingFile.id))
     } catch (e) { setError('Could not remove file from library.') }
     setConfirmOpen(false)
@@ -87,7 +101,7 @@ export function RecentFilesPage({ onNavigate }) {
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       {files.length === 0 ? (
-        <div className="recent-empty-state"><div className="empty-icon-wrap"><Icon name="pages" size={32} /></div><h3>No recent documents yet</h3><p>PDF files you open or export in the desktop app will appear here.</p><button className="browse-button" type="button" onClick={() => onNavigate({ type: 'home' })}>Back to Home <Icon name="arrow" size={15} /></button></div>
+        <div className="recent-empty-state"><div className="empty-icon-wrap"><Icon name="pages" size={32} /></div><h3>No recent documents yet</h3><p>PDFs you open or export are stored on this device and will appear here.</p><button className="browse-button" type="button" onClick={() => onNavigate({ type: 'home' })}>Back to Home <Icon name="arrow" size={15} /></button></div>
       ) : (
         <div className="recent-files-list">{files.map((file) => <div key={file.id} data-pdf-id={file.id} data-pdf-name={file.name} className="recent-file-card clickable" onClick={() => open(file)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.target.closest('button, a, input, textarea, select')) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(file) } }}>
           <button type="button" className="delete-card-btn" onClick={(event) => { event.stopPropagation(); showDeleteConfirm(file) }} aria-label={`Remove ${file.name} from library`}>

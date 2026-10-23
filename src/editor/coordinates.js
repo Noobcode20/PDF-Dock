@@ -95,25 +95,10 @@ export function gestureRegion(region, dx, dy, resize = false) {
   if (resize) return {...region, width: Math.max(.005, Math.min(1-region.x, region.width+dx)), height: Math.max(.005, Math.min(1-region.y, region.height+dy))};
   return {...region, x: Math.max(0, Math.min(1-region.width, region.x+dx)), y: Math.max(0, Math.min(1-region.height, region.y+dy))};
 }
-/** Image unit space -> upright display points. Preserve the selected affine
- * transform for replacement; captured pixels already include that transform. */
-export function imagePlacement(frame, operation) {
-  const box = displayRect(frame, operation);
-  const angle = -(Number(operation.imageRotation) || 0) * Math.PI / 180;
-  const rotate = ([x,y]) => [Math.cos(angle)*x-Math.sin(angle)*y, Math.sin(angle)*x+Math.cos(angle)*y];
-  if (operation.replacementData && operation.imageTransform) {
-    const [a,b,c,d,e,f] = operation.imageTransform, original = operation.original || operation;
-    const sx = box.width / original.width, sy = box.height / original.height;
-    const center = [box.x+box.width/2,box.y+box.height/2];
-    const v = rotate([a*sx,-b*sy]), w = rotate([c*sx,-d*sy]);
-    const origin = rotate([(e-original.x)*sx-box.width/2,(original.y+original.height-f)*sy-box.height/2]);
-    return [v[0],v[1],w[0],w[1],center[0]+origin[0],center[1]+origin[1]];
-  }
-  const swap = Math.abs(Math.round(angle*180/Math.PI)) % 180 === 90;
-  const width=swap?box.height:box.width,height=swap?box.width:box.height;
-  const v=rotate([width,0]),w=rotate([0,height]),origin=rotate([-width/2,-height/2]);
-  return [v[0],v[1],w[0],w[1],box.x+box.width/2+origin[0],box.y+box.height/2+origin[1]];
-}
+/** Image unit space -> upright display points.
+ * The placement lives in src/editor/imageModel.js so the on-screen preview and
+ * the PDF writer always agree on the same affine transform. */
+export { imagePlacement, imagePlacementMatrix, imageCorners } from "./imageModel.js";
 
 export function reframeRegion(page, region, toRotation=0) {
  const from=displayFrame(page,Number(region.viewerRotation)||0),to=displayFrame(page,toRotation),box=displayRect(from,region);

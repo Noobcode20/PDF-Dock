@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { saveOutput } from '../fileServices'
+import { recentFilesBackend } from '../recentFiles'
 import { Presence } from '../components/Presence'
 
 const formatBytes = (size = 0) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`
@@ -35,7 +36,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     setActiveIndex(0)
     setRecentLoading(true)
     window.setTimeout(() => inputRef.current?.focus(), 50)
-    Promise.resolve(window.pdfKing?.getRecentFiles?.())
+    Promise.resolve(recentFilesBackend().getRecentFiles?.())
       .then((files) => { if (active) setRecentFiles(Array.isArray(files) ? files : []) })
       .catch(() => { if (active) setRecentFiles([]) })
       .finally(() => { if (active) setRecentLoading(false) })
@@ -85,11 +86,12 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
 
   const openRecent = async (record) => {
     if (busy) return
-    if (!window.pdfKing?.readRecentFile) return
+    const backend = recentFilesBackend()
+    if (!backend?.readRecentFile) { setError('This PDF could not be opened because local file storage is unavailable.'); return }
     setBusy(true)
     setError('')
     try {
-      const data = await window.pdfKing.readRecentFile(record.id)
+      const data = await backend.readRecentFile(record.id)
       if (!data) throw new Error(`Could not read ${record.name}.`)
       const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath = record.sourcePath; importFile(file)
     } catch (cause) {
@@ -156,7 +158,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
               <div className="palette-list">
                 <button className={`palette-item ${activeIndex === 0 ? 'active' : ''}`} data-file-picker-index="0" aria-current={activeIndex === 0 ? 'true' : undefined} type="button" onMouseEnter={() => setActiveIndex(0)} onClick={chooseFromDevice} disabled={busy}>
                   <span className="tool-icon neutral palette-item-icon"><Icon name="upload" size={18} /></span>
-                  <div className="palette-item-text"><div className="palette-item-title-row"><strong>Choose a PDF on this device</strong></div><small>Browse files on your computer</small></div>
+                  <div className="palette-item-text"><div className="palette-item-title-row"><strong>Choose a PDF on this device</strong></div><small>Browse files on this device</small></div>
                   <span className="palette-item-category">Browse</span><Icon name="arrow" size={14} className="palette-item-arrow" />
                 </button>
               </div>
@@ -180,7 +182,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
         </> : <>
         <header className="new-doc-dialog-header">
           <div>
-            <span className="new-doc-kicker">PDF KING</span>
+            <span className="new-doc-kicker">PDF DOCK</span>
             <h2 id="new-doc-title">{mode === 'open-pdf' ? 'Open a PDF' : 'New document'}</h2>
             <p>{mode === 'open-pdf' ? 'Choose a recent PDF or browse your device.' : 'Open a PDF or start with a blank page.'}</p>
           </div>

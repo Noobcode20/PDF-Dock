@@ -1,8 +1,18 @@
 import { RichTextInput } from '../editor/RichTextInput'
 import { appendTextStyleRange, textStyleAt } from '../editor/textStyles'
 import { captureRevision, assertRevision, sessionAfterWrite } from '../editor/revisionGuard'
-import { displayRect, imagePlacement } from '../editor/coordinates'
-import { prepareImageOperations } from '../editor/prepareImages'
+import {
+  cropWindow,
+  duplicateImage,
+  fillImageToPage,
+  fitImageToPage,
+  imageSvgMatrix,
+  multiplyMatrices,
+  normalizeImageEdit,
+  resizeImage,
+} from '../editor/imageModel'
+import { prepareImageOperations, detectImageType } from '../editor/prepareImages'
+import { imageDoubleClickPlan } from '../editor/imageInteraction'
 import { RegionLayer } from '../editor/RegionLayer'
 import { FormCandidatesPanel } from '../editor/FormCandidatesPanel'
 import { PropertiesDialog } from '../editor/PropertiesDialog'
@@ -16,8 +26,10 @@ import { writeEditorDocument } from '../editor/save'
 import React, { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { ToolCard } from '../components/ToolCard'
+import { ImageInspector } from '../components/ImageInspector'
 import { allTools } from '../toolsData'
 import { forgetPdfCopy, rememberPdf, saveOutput } from '../fileServices'
+import { recentFilesBackend } from '../recentFiles'
 import { Presence } from '../components/Presence'
 import { loadShortcuts, matchesShortcut } from '../keyboardShortcuts'
 
@@ -164,7 +176,7 @@ function OutputDocxPreview({ data, title }) {
 const createInitialOptions = () => ({
   pages: '', ranges: '1-3', splitMode: 'ranges', rotation: 90, watermarkText: 'CONFIDENTIAL',
   opacity: 35, angle: 45, position: 'bottom-center', startNumber: 1, format: '{n}', dpi: 144,
-  quality: 'recommended', margins: { top: 10, right: 15, bottom: 10, left: 15 },
+  quality: 'recommended', unit: 'mm', margins: { top: 10, right: 15, bottom: 10, left: 15 },
   language: 'eng', ocrDpi: 200,
   signature: '', annotationText: '', password: '', confirmPassword: '', pageSize: 'a4',
   redactPage: '1', redactX: 0, redactY: 0, redactWidth: 0, redactHeight: 0,
@@ -214,7 +226,7 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
     setFilePickerActiveIndex(0)
     setFilePickerKeyboardNav(false)
     setFileSelectorOpen(true)
-    Promise.resolve(window.pdfKing?.getRecentFiles?.()).then((records) => setRecentFiles(Array.isArray(records) ? records : [])).catch(() => setRecentFiles([]))
+    Promise.resolve(recentFilesBackend().getRecentFiles?.()).then((records) => setRecentFiles(Array.isArray(records) ? records : [])).catch(() => setRecentFiles([]))
   }
 
   useEffect(() => {
@@ -338,10 +350,11 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
   }
 
   const openRecentFile = async (record) => {
-    if (!window.pdfKing?.readRecentFile) return
+    const backend = recentFilesBackend()
+    if (!backend?.readRecentFile) { setError('This PDF could not be opened because local file storage is unavailable.'); return }
     setFilePickerBusy(true)
     try {
-      const data = await window.pdfKing.readRecentFile(record.id)
+      const data = await backend.readRecentFile(record.id)
       if (!data) throw new Error('Could not read this recent file.')
       const file = new File([data], record.name, { type: 'application/pdf' })
       if (!accepts(toolId, file)) {
@@ -405,7 +418,7 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
     try {
       const runOptions = {
         ...options,
-        ...(toolId === 'crop-pdf' ? options.margins : {}),
+        ...(toolId === 'crop-pdf' ? { ...options.margins, unit: options.unit || 'mm' } : {}),
         ...(toolId === 'add-watermark' ? { opacity: Number(options.opacity) / 100, text: options.watermarkText } : {}),
         ...(toolId === 'compress-pdf' ? { level: options.quality === 'lossless' ? 'lossless' : options.quality === 'small' ? 'extreme' : options.quality === 'high' ? 'light' : 'recommended', quality: options.quality === 'small' ? 0.42 : options.quality === 'high' ? 0.86 : 0.68 } : {}),
         ...(toolId === 'split-pdf' ? { mode: options.splitMode === 'each' ? 'all' : 'range' } : {}),
@@ -720,7 +733,7 @@ const SECURE_EDITOR_TOOLS = [
 const EDITOR_TOOLBAR_TOOLS = [
   ['pdf-editor','Select','cursor'], ['edit-text','Edit text','edit'], ['add-text','Add text','type'],
   ['comment','Add comment','comment'], ['highlight','Highlight','edit'], ['draw','Draw','pen'],
-  ['images','Add image','image'], ['sign-pdf','Sign','signature'],
+  ['images','Images','image'], ['sign-pdf','Sign','signature'],
   ['edit-bookmarks','Bookmarks','pages'], ['crop-pdf','Crop page','crop'], ['add-watermark','Watermark','layers'],
   ['page-numbers','Page numbers','pages'],
 ]
@@ -821,6 +834,9 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const [selectedImage, setSelectedImage] = useState(() => editorDraft?.selectedImage || null)
   const [editHistory, setEditHistory] = useState(() => editorDraft?.editHistory || { past: [], future: [] })
   const currentEditSnapshot = useRef({ files: restoredFiles, revision: session.revision, annotations:editorDraft?.annotations||[], textEdits: editorDraft?.textEdits || [], imageEdits: editorDraft?.imageEdits || [], redaction: Array.isArray(editorDraft?.redaction) ? editorDraft.redaction : editorDraft?.redaction ? [{ ...editorDraft.redaction, page: Number(editorDraft.redaction.page) || 1 }] : [], options: editorDraft?.options || createInitialOptions() })
+  /* The crop slider writes one edit per input tick. The session key keeps
+   * those ticks in a single history entry until the drag settles. */
+  const cropSession = useRef({ key: null, timer: null })
   const [textStyle, setTextStyle] = useState(() => editorDraft?.textStyle || DEFAULT_PDF_TEXT_STYLE)
   const [localFonts, setLocalFonts] = useState([])
   useEffect(() => { listLocalFonts().then(setLocalFonts).catch(() => {}) }, [])
@@ -840,7 +856,8 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   }
   const [editorMenuTab, setEditorMenuTab] = useState(() => SECURE_EDITOR_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'secure' : INSERT_EDITOR_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'insert' : PDF_EXPORT_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'export' : 'home')
   const [editorSearchExpanded, setEditorSearchExpanded] = useState(() => Boolean(editorDraft?.viewerState?.searchQuery))
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false)
+  // Phones start with the side panels folded away so the document keeps the room.
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 560px)').matches)
   useEffect(() => {
     const root = editorWorkspaceRef.current
     const tooltip = editorTooltipRef.current
@@ -907,6 +924,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const markAutosaved = () => onDirtyChange(true)
 
   const applyEditSnapshot = (snapshot) => {
+    const previousEdits = currentEditSnapshot.current.imageEdits || []
     snapshot = { ...snapshot, files: snapshot.files || filesRef.current, revision: snapshot.revision || revisedSession(sessionRef.current, 'edit').revision }
     currentEditSnapshot.current = snapshot
     filesRef.current = snapshot.files
@@ -915,6 +933,15 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     setAnnotations(snapshot.annotations||[])
     setTextEdits(snapshot.textEdits)
     setImageEdits(snapshot.imageEdits || [])
+    /* Undo can remove the edit the inspector points at, so the selection is
+     * reconciled with the restored edits instead of showing a stale image. */
+    setSelectedImage((current) => {
+      if (!current) return current
+      const restored = (snapshot.imageEdits || []).find((edit) => edit.page === current.page && edit.key === current.key)
+      if (restored) return { ...current, ...restored }
+      const wasEdited = previousEdits.some((edit) => edit.page === current.page && edit.key === current.key)
+      return wasEdited ? null : current
+    })
     setRedaction(snapshot.redaction || [])
     setOptions(snapshot.options || createInitialOptions())
     setOutputs([])
@@ -1089,7 +1116,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
       let currentFile=await commitCurrent()
       if(['pdf-editor','select','edit-text','add-text','images','fill-forms','highlight','underline','strike','draw','rectangle','ellipse','line','arrow','comment','form-text','form-checkbox','form-dropdown','form-list','form-radio','form-design','annotation-select'].includes(toolId))return currentFile
       const {processTool}=await import('../pdfEngine')
-      const runOptions={...options,...(['add-watermark','page-numbers'].includes(toolId)?{pages:undefined}:{}),...(toolId==='crop-pdf'?options.margins:{}),...(toolId==='edit-bookmarks'?{bookmarks:String(options.bookmarksText||'').split('\n').map(line=>{const match=line.match(/^\s*(\d+)\s*[:|]\s*(.+?)\s*$/);return match?{page:Number(match[1]),title:match[2]}:null}).filter(Boolean)}:{}),...(toolId==='add-watermark'?{opacity:Number(options.opacity)/100,text:options.watermarkText}:{}),redactions:redaction.map(mark=>({...mark,normalized:true}))}
+      const runOptions={...options,...(toolId==='crop-pdf'?{...options.margins,unit:options.unit||'mm'}:{}),...(toolId==='edit-bookmarks'?{bookmarks:String(options.bookmarksText||'').split('\n').map(line=>{const match=line.match(/^\s*(\d+)\s*[:|]\s*(.+?)\s*$/);return match?{page:Number(match[1]),title:match[2]}:null}).filter(Boolean)}:{}),...(toolId==='add-watermark'?{opacity:Number(options.opacity)/100,text:options.watermarkText}:{}),redactions:redaction.map(mark=>({...mark,normalized:true}))}
       const expected=captureRevision(sessionRef.current,currentFile)
       const controller=new AbortController();runController=controller;processingController.current=controller;setBusy(true)
       const result=await processTool({toolId,files:[currentFile],options:runOptions,signal:controller.signal,onProgress:state=>{if(!controller.signal.aborted&&sessionRef.current.id===expected.id&&sessionRef.current.revision===expected.revision&&filesRef.current[0]===expected.file)setMessage(`${state.message||'Processing…'} ${Math.round((state.value||0)*100)}%`)}})
@@ -1112,7 +1139,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
       const writtenSession={...sessionRef.current}
       let writeFile=currentFile
       if(sessionRef.current.password){const {encryptEditorPdf}=await import('../pdfEngine');writeFile=await encryptEditorPdf(currentFile,sessionRef.current.password)}
-      const result=await writeEditorDocument({file:writeFile,session:writtenSession,mode,bridge:window.pdfKing,download:output=>saveOutput(output,{recordRecent:false}),recordRecent:record=>window.localStorage.getItem('pdfking-keep-recent')!=='false'&&window.pdfKing?.addRecentFile?.(record)})
+      const result=await writeEditorDocument({file:writeFile,session:writtenSession,mode,bridge:window.pdfKing,download:output=>saveOutput(output,{recordRecent:false}),recordRecent:record=>window.localStorage.getItem('pdfking-keep-recent')!=='false'&&recentFilesBackend()?.addRecentFile?.(record)})
       if(!result)return false
       if(sessionRef.current.id!==writtenSession.id)return true
       if(result.saved){
@@ -1207,15 +1234,129 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     setSelectedImage(image)
     setOutputs([])
   }
-  const saveImageEdit = (edit) => {
+  /* A double click on an image opens the image inspector for it. The image
+   * itself is never moved, duplicated or transformed by the double click. */
+  const openImageInspector = (image) => {
+    if (toolId !== 'images') activateEditorTool('images')
+    selectImageObject(image)
+  }
+  const saveImageEdit = (edit, options = {}) => {
     const key = `${edit.page}:${edit.key}`
-    const previous = imageEdits.find((item) => `${item.page}:${item.key}` === key)
-    const next = [...imageEdits.filter((item) => `${item.page}:${item.key}` !== key), { ...edit, ...previous, ...edit }]
-    commitEditSnapshot({ ...currentEditSnapshot.current, imageEdits: next })
+    /* The live snapshot is read from the ref, never from the render closure:
+     * a listener registered earlier (paste, drop) would otherwise merge into a
+     * stale list and drop the edits that were made in the meantime. */
+    const edits = currentEditSnapshot.current.imageEdits || []
+    const previous = edits.find((item) => `${item.page}:${item.key}` === key)
+    const next = [...edits.filter((item) => `${item.page}:${item.key}` !== key), { ...edit, ...previous, ...edit }]
+    if (options.coalesce && cropSession.current.key === key) {
+      /* One history entry for a whole slider drag, not one per input tick. */
+      applyEditSnapshot({ ...currentEditSnapshot.current, imageEdits: next })
+    } else {
+      commitEditSnapshot({ ...currentEditSnapshot.current, imageEdits: next })
+    }
+    if (options.coalesce) {
+      cropSession.current.key = key
+      if (cropSession.current.timer) clearTimeout(cropSession.current.timer)
+      cropSession.current.timer = setTimeout(() => { cropSession.current.key = null }, 700)
+    } else {
+      cropSession.current.key = null
+      if (cropSession.current.timer) clearTimeout(cropSession.current.timer)
+    }
     setSelectedImage(edit)
     cancelCurrentOperation(); setBusy(false)
   }
-  const updateSelectedImage = patch => { if(selectedImage) saveImageEdit({...selectedImage,...selectedImageEdit,...patch}) }
+  const updateSelectedImage = (patch, options) => { if(selectedImage) saveImageEdit({...selectedImage,...selectedImageEdit,...patch}, options) }
+  const imageFrameFor = (page) => {
+    const size = pageSizes[page-1] || { width: 612, height: 792, rotation: 0 }
+    const rotation = (((Number(size.rotation)||0) + (Number(viewerState.rotation)||0)) % 360 + 360) % 360
+    return rotation % 180 ? { width: size.height, height: size.width } : { width: size.width, height: size.height }
+  }
+  /** Place a PNG or JPEG file on the page, keeping its pixel aspect ratio. */
+  const placeImageFile = async (image, position) => {
+    if (!file) { setError('Open a PDF before adding an image.'); return }
+    try {
+      const bytes = new Uint8Array(await image.arrayBuffer())
+      const type = detectImageType(bytes)
+      if (!type) throw new Error('Only PNG and JPEG images can be added to a PDF.')
+      const expected = captureRevision(sessionRef.current, file)
+      const page = Number(position?.page) || currentViewerPage
+      const viewerRotation = Number(viewerState.rotation) || 0
+      const bitmap = await createImageBitmap(new Blob([bytes], { type }))
+      const sourceWidth = bitmap.width
+      const sourceHeight = bitmap.height
+      bitmap.close()
+      if (!sourceWidth || !sourceHeight) throw new Error('This image has no readable pixels.')
+      const frame = imageFrameFor(page)
+      const width = 0.4
+      const height = Math.max(0.02, Math.min(0.95, (width * frame.width) / ((sourceWidth / sourceHeight) * frame.height)))
+      const x = position?.x === undefined ? (1-width)/2 : Math.max(0, Math.min(1-width, position.x - width/2))
+      const y = position?.y === undefined ? (1-height)/2 : Math.max(0, Math.min(1-height, position.y - height/2))
+      assertRevision(expected, sessionRef.current, filesRef.current[0])
+      const key = `image-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+      saveImageEdit({ isNew: true, key, page, x, y, width, height, replacementData: bytes, replacementType: type, sourceWidth, sourceHeight, aspectLocked: true, viewerRotation })
+      setSelectedImage({ page, key })
+      setMessage('Image added. Drag it on the page, or use the image controls to size it.')
+    } catch (cause) {
+      setError(cause.message || 'This image could not be decoded.')
+    }
+  }
+  /* The paste listener is registered once and must call the newest handler, so
+   * a paste always merges into the edits that exist right now. */
+  const placeImageFileRef = useRef(placeImageFile)
+  placeImageFileRef.current = placeImageFile
+  const replaceSelectedImage = async (image) => {
+    try {
+      const bytes = new Uint8Array(await image.arrayBuffer())
+      const type = detectImageType(bytes)
+      if (!type) throw new Error('Only PNG and JPEG images can be used as a replacement.')
+      if (sessionRef.current.id!==session.id||sessionRef.current.revision!==session.revision||filesRef.current[0]!==file) {
+        setError('Document changed while reading the image. Select it and try again.')
+        return
+      }
+      const bitmap = await createImageBitmap(new Blob([bytes], { type }))
+      const sourceWidth = bitmap.width
+      const sourceHeight = bitmap.height
+      bitmap.close()
+      updateSelectedImage({ replacementData: bytes, replacementType: type, sourceWidth, sourceHeight })
+    } catch (cause) { setError(cause.message || 'This image could not be decoded.') }
+  }
+  const duplicateSelectedImage = () => {
+    const current = selectedImageEdit || selectedImage
+    if (!current) return
+    const source = current.replacementData || current.sourceData || selectedImage?.sourceData
+    if (!source) { setError('This image has not been read yet. Select it again before duplicating.'); return }
+    const key = `image-${Date.now()}-${Math.random().toString(36).slice(2,7)}`
+    const copy = duplicateImage(current, key)
+    saveImageEdit({ ...copy, key, sourceData: current.sourceData || source, replacementData: current.replacementData })
+    setSelectedImage({ page: copy.page, key })
+  }
+  const deleteSelectedImage = () => { if (selectedImage) updateSelectedImage({ deleted: true }) }
+  /** Apply an inspector patch, including the fit/fill page shortcuts. */
+  const applyImagePatch = (patch) => {
+    if (!selectedImage) return
+    const current = selectedImageEdit || selectedImage
+    const frame = imageFrameFor(current.page || currentViewerPage)
+    if (patch.fitToPage) { updateSelectedImage(fitImageToPage(current, frame)); return }
+    if (patch.fillToPage) { updateSelectedImage(fillImageToPage(current, frame)); return }
+    const { fitToPage, fillToPage, ...rest } = patch
+    if (rest.crop) {
+      const next = { ...current, crop: rest.crop }
+      /* The slider writes one value per tick: keep a single history entry. */
+      if (current.aspectLocked !== false) {
+        const resized = resizeImage(next, { width: current.width }, frame)
+        updateSelectedImage({ crop: rest.crop, width: resized.width, height: resized.height }, { coalesce: true })
+        return
+      }
+      updateSelectedImage({ crop: rest.crop }, { coalesce: true })
+      return
+    }
+    if ('width' in rest || 'height' in rest) {
+      const resized = resizeImage(current, { width: rest.width, height: rest.height }, frame)
+      updateSelectedImage({ width: resized.width, height: resized.height, x: rest.x === undefined ? resized.x : rest.x, y: rest.y === undefined ? resized.y : rest.y })
+      return
+    }
+    updateSelectedImage(rest)
+  }
   const placeSignature = async signature => {
     const expected=captureRevision(sessionRef.current,file),page=signatureFieldTarget?.page??currentViewerPage,viewerRotation=Number(viewerState.rotation)||0;
     try {
@@ -1232,6 +1373,20 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
       setToolId(signature.text?'edit-text':'images');
     }catch(cause){setError(cause.message||'Could not place the signature.')}
   }
+  // Paste a PNG or JPEG from the clipboard straight onto the current page.
+  useEffect(() => {
+    if (toolId !== 'images' || !file) return undefined
+    const handlePaste = (event) => {
+      const item = [...(event.clipboardData?.items || [])].find((entry) => entry.type.startsWith('image/'))
+      const pasted = item?.getAsFile?.()
+      if (!pasted) return
+      event.preventDefault()
+      void placeImageFileRef.current(pasted, { page: currentViewerPage })
+    }
+    window.addEventListener('paste', handlePaste)
+    return () => window.removeEventListener('paste', handlePaste)
+  }, [toolId, file, currentViewerPage])
+
   const handlePdfShortcut = (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return
     const target = event.target
@@ -1311,23 +1466,26 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
         else activateEditorTool(id)
       }}><Icon name={icon} size={17} /></button>)}
     </nav>
-    {editorMenuTab==='organize'? <div className="pdf-editor-options"><div className="editor-options-label"><strong>Format &amp; Object</strong><small>Organize pages · Page {selectedOrganizerPage + 1}</small></div>{[['rotate','Rotate 90°'],['duplicate','Duplicate'],['delete','Delete'],['blank','Insert blank']].map(([action,label])=><button className="editor-open-button" key={action} disabled={!file||busy} onClick={()=>void commitCurrent([{type:'pages',action,index:selectedOrganizerPage}]).catch(cause=>setError(cause.message))}>{label}</button>)}<button className="editor-open-button" disabled={!file||busy} onClick={()=>insertPicker.current?.click()}>Insert PDF</button><button className="editor-open-button" disabled={!file||busy} onClick={async()=>{try{const current=await commitCurrent();const {processTool}=await import('../pdfEngine');const result=await processTool({toolId:'extract-pages',files:[current],options:{pages:String(selectedOrganizerPage+1)}});await saveOutput(result.outputs[0])}catch(cause){setError(cause.message)}}}>Extract page</button><input hidden ref={insertPicker} type="file" accept=".pdf,application/pdf" onChange={async event=>{const source=event.target.files?.[0];event.target.value='';if(source)try{await commitCurrent([{type:'insert',index:selectedOrganizerPage,bytes:new Uint8Array(await source.arrayBuffer())}])}catch(cause){setError(cause.message)}}}/></div> : ['home', 'insert'].includes(editorMenuTab) ? <div className="pdf-editor-options pdf-editor-context-options">
-      <div className="editor-options-label"><strong>Format &amp; Object</strong></div>
+    {editorMenuTab==='organize'? <div className="pdf-editor-options"><div className="editor-options-label"><strong>Format &amp; Object</strong><small>Organize pages · Page {selectedOrganizerPage + 1}</small></div>{[['rotate','Rotate 90°'],['duplicate','Duplicate'],['delete','Delete'],['blank','Insert blank']].map(([action,label])=><button className="editor-open-button" key={action} disabled={!file||busy} onClick={()=>void commitCurrent([{type:'pages',action,index:selectedOrganizerPage}]).catch(cause=>setError(cause.message))}>{label}</button>)}<button className="editor-open-button" disabled={!file||busy} onClick={()=>insertPicker.current?.click()}>Insert PDF</button><button className="editor-open-button" disabled={!file||busy} onClick={async()=>{try{const current=await commitCurrent();const {processTool}=await import('../pdfEngine');const result=await processTool({toolId:'extract-pages',files:[current],options:{pages:String(selectedOrganizerPage+1)}});await saveOutput(result.outputs[0])}catch(cause){setError(cause.message)}}}>Extract page</button><input hidden ref={insertPicker} type="file" accept=".pdf,application/pdf" onChange={async event=>{const source=event.target.files?.[0];event.target.value='';if(source)try{await commitCurrent([{type:'insert',index:selectedOrganizerPage,bytes:new Uint8Array(await source.arrayBuffer())}])}catch(cause){setError(cause.message)}}}/></div> : ['home', 'insert'].includes(editorMenuTab) ? <div className={`pdf-editor-options pdf-editor-context-options ${['edit-text', 'add-text'].includes(toolId) ? 'pdf-editor-text-properties' : ''}`}>
+      <div className="editor-options-label"><strong>{toolId === 'images' ? 'Image' : ['edit-text', 'add-text'].includes(toolId) ? 'Text properties' : 'Format & Object'}</strong>{toolId === 'images' && <small>{selectedImage ? (selectedImage.page ? `Selected on page ${selectedImage.page}` : 'Image selected') : 'No image selected'}</small>}{['edit-text', 'add-text'].includes(toolId) && <small>{toolId === 'add-text' ? 'New text' : 'Selected text'}</small>}</div>
       <div className="editor-options-fields contextual-options-content">
         <div className="contextual-tool-settings">
           {['highlight','underline','strike','draw','rectangle','ellipse','line','arrow','comment','form-text','form-checkbox','form-dropdown','form-list','form-radio','form-design','annotation-select'].includes(toolId)&&<><label>Color <input type="color" value={annotationStyle.color} onChange={e=>setAnnotationStyle({...annotationStyle,color:e.target.value})}/></label><label>Thickness <input type="number" min="1" max="20" value={annotationStyle.thickness} onChange={e=>setAnnotationStyle({...annotationStyle,thickness:Number(e.target.value)})}/></label><label>Opacity <input type="range" min=".1" max="1" step=".1" value={annotationStyle.opacity} onChange={e=>setAnnotationStyle({...annotationStyle,opacity:Number(e.target.value)})}/></label><span>Select text to mark it, or drag on the page.</span></>}
-          {toolId==='images'&&<><button className="editor-open-button" onClick={()=>imagePicker.current?.click()}>Add image</button><input hidden type="file" accept="image/png,image/jpeg" ref={imagePicker} onChange={async e=>{const image=e.target.files?.[0];e.target.value='';if(!image)return;setBusy(true);try{const expected=captureRevision(sessionRef.current,file);const imagePage=currentViewerPage,imageViewerRotation=Number(viewerState.rotation)||0;const data=new Uint8Array(await image.arrayBuffer());const bitmap=await createImageBitmap(image);const aspect=bitmap.height/bitmap.width;bitmap.close();const {inspectPdfPageSize}=await import('../pdfEngine');const size=await inspectPdfPageSize(file,imagePage,imageViewerRotation);assertRevision(expected,sessionRef.current,filesRef.current[0]);saveImageEdit({isNew:true,key:`image-${Date.now()}`,page:imagePage,x:.15,y:.15,width:.3,height:Math.min(.6,.3*aspect*size.width/size.height),replacementData:data,replacementType:image.type,viewerRotation:Number(viewerState.rotation)||0})}catch(cause){setError(cause.message||'This image could not be decoded.')}finally{setBusy(false)}}}/></>}
+          {toolId==='images'&&<><ImageInspector image={selectedImageEdit || (selectedImage ? normalizeImageEdit(selectedImage) : null)} page={selectedImage?.page || currentViewerPage} pageSize={imageFrameFor(selectedImage?.page || currentViewerPage)} busy={busy} onChange={applyImagePatch} onAddImage={()=>imagePicker.current?.click()} onReplaceImage={file=>void replaceSelectedImage(file)} onDelete={deleteSelectedImage} onDuplicate={duplicateSelectedImage} onCropChange={crop=>applyImagePatch({crop})} onResetCrop={()=>{cropSession.current.key=null;applyImagePatch({crop:{top:0,right:0,bottom:0,left:0}})}} /><input hidden type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" ref={imagePicker} onChange={async e=>{const image=e.target.files?.[0];e.target.value='';if(image)await placeImageFile(image)}}/><small className="image-inspector-note">Drop a PNG or JPEG onto the page, or paste one from the clipboard, to place it.</small></>}
 
-          {['edit-text', 'add-text'].includes(toolId) && <>
+          {['edit-text', 'add-text'].includes(toolId) && <div className="text-inspector">
+            <section className="text-inspector-section"><h3>Position</h3><span className="text-inspector-label">Text alignment</span><div className="text-inspector-segment" aria-label="Text alignment">{['left','center','right'].map(alignment => <button type="button" key={alignment} aria-label={`Align ${alignment}`} aria-pressed={(textStyle.alignment || 'left') === alignment} onClick={() => setTextStyle(style => ({ ...style, alignment }))}>{alignment === 'left' ? '⇤' : alignment === 'center' ? '↔' : '⇥'}</button>)}</div><span className="text-inspector-label">Drag the text box on the page to change its position.</span></section>
+            <section className="text-inspector-section"><h3>Layout</h3><span className="text-inspector-label">Resize the text box by dragging an edge or corner. The text stays inside the box.</span></section>
+            <section className="text-inspector-section"><h3>Appearance</h3><label className="text-style-control text-inspector-wide">Opacity <input aria-label="Text opacity" type="range" min="10" max="100" step="5" value={textStyle.opacity ?? 100} onChange={event => setTextStyle(style => ({ ...style, opacity: Number(event.target.value) }))} /><span>{textStyle.opacity ?? 100}%</span></label></section>
+            <section className="text-inspector-section text-inspector-typography"><h3>Typography <span aria-hidden="true">⠿</span></h3>
             <label className="text-style-control">Font <select className="studio-input" value={textStyle.localFontId ? `local:${textStyle.localFontId}` : textStyle.fontFamily} onChange={(event) => void selectTextFont(event.target.value)}>{!PDF_TEXT_FONTS.includes(textStyle.fontFamily) && !textStyle.localFontId && <option value={textStyle.fontFamily}>{textStyle.fontFamily}</option>}{PDF_TEXT_FONTS.map((font) => <option key={font} value={font}>{font}</option>)}{localFonts.map((font) => <option key={font.id} value={`local:${font.id}`}>{font.name} · local</option>)}</select></label>
-            <label className="text-style-control">Size <select className="studio-input" value={textStyle.fontSize} onChange={(event) => setTextStyle((style) => ({ ...style, fontSize: Number(event.target.value) }))}>{![8, 10, 12, 14, 16, 18, 24, 32, 48].includes(textStyle.fontSize) && <option value={textStyle.fontSize}>{textStyle.fontSize} pt</option>}{[8, 10, 12, 14, 16, 18, 24, 32, 48].map((size) => <option key={size} value={size}>{size} pt</option>)}</select></label>
-            <label className="text-style-control">Color <input className="text-style-color" aria-label="Text color" type="color" value={textStyle.color} onChange={(event) => setTextStyle((style) => ({ ...style, color: event.target.value }))} /></label>
-            <button type="button" className={`text-style-toggle ${textStyle.bold ? 'active' : ''}`} aria-pressed={textStyle.bold} onClick={() => setTextStyle((style) => ({ ...style, bold: !style.bold }))}><b>B</b></button>
-            <button type="button" className={`text-style-toggle ${textStyle.italic ? 'active' : ''}`} aria-pressed={textStyle.italic} onClick={() => setTextStyle((style) => ({ ...style, italic: !style.italic }))}><i>I</i></button>
+            <div className="text-inspector-row"><label className="text-style-control">Weight <select className="studio-input" value={textStyle.bold ? '700' : '400'} onChange={(event) => setTextStyle((style) => ({ ...style, bold: event.target.value === '700' }))}><option value="400">Regular</option><option value="700">Bold</option></select></label><label className="text-style-control">Size <select className="studio-input" value={textStyle.fontSize} onChange={(event) => setTextStyle((style) => ({ ...style, fontSize: Number(event.target.value) }))}>{![8, 10, 12, 14, 16, 18, 24, 32, 48].includes(textStyle.fontSize) && <option value={textStyle.fontSize}>{textStyle.fontSize} pt</option>}{[8, 10, 12, 14, 16, 18, 24, 32, 48].map((size) => <option key={size} value={size}>{size} pt</option>)}</select></label></div>
+            <div className="text-inspector-row"><label className="text-inspector-wide">Line height <select className="studio-input" aria-label="Line height" value={textStyle.lineHeight || 1.2} onChange={event => setTextStyle(style => ({ ...style, lineHeight: Number(event.target.value) }))}><option value="1">100%</option><option value="1.15">115%</option><option value="1.2">120%</option><option value="1.5">150%</option><option value="2">200%</option></select></label><label className="text-inspector-wide">Letter spacing <input aria-label="Letter spacing" type="number" min="-2" max="20" step="0.25" value={textStyle.letterSpacingPt || 0} onChange={event => setTextStyle(style => ({ ...style, letterSpacingPt: Number(event.target.value) }))} /></label></div>
+            <span className="text-inspector-label">Paragraph alignment</span><div className="text-inspector-segment" aria-label="Paragraph alignment">{['left','center','right'].map(alignment => <button type="button" key={alignment} aria-label={`Align ${alignment}`} aria-pressed={(textStyle.alignment || 'left') === alignment} onClick={() => setTextStyle(style => ({ ...style, alignment }))}>{alignment === 'left' ? '≡' : alignment === 'center' ? '☰' : '≋'}</button>)}</div>
+            <label className="text-style-control text-inspector-color">Color <input className="text-style-color" aria-label="Text color" type="color" value={textStyle.color} onChange={(event) => setTextStyle((style) => ({ ...style, color: event.target.value }))} /></label>
+            <div className="text-inspector-formatting"><button type="button" className={`text-style-toggle ${textStyle.bold ? 'active' : ''}`} aria-pressed={textStyle.bold} onClick={() => setTextStyle((style) => ({ ...style, bold: !style.bold }))}><b>B</b></button><button type="button" className={`text-style-toggle ${textStyle.italic ? 'active' : ''}`} aria-pressed={textStyle.italic} onClick={() => setTextStyle((style) => ({ ...style, italic: !style.italic }))}><i>I</i></button></div>
             {toolId === 'add-text' && <span className="edit-text-help">{textEdits.length ? `${textEdits.length} text box${textEdits.length === 1 ? '' : 'es'} ready` : 'Set a style, then click the page to place text.'}</span>}
-          </>}
-          {toolId==='images'&&selectedImage&&<><button className="editor-open-button" onClick={()=>updateSelectedImage({deleted:true})}>Delete image</button><label>Free resize <input type="checkbox" checked={Boolean(selectedImageEdit?.freeResize)} onChange={e=>updateSelectedImage({freeResize:e.target.checked})}/></label><button className="editor-open-button" onClick={()=>updateSelectedImage({imageRotation:((selectedImageEdit?.imageRotation||0)+90)%360})}>Rotate image</button></>}
-          {toolId === 'images' && <ImageOptions selectedImage={selectedImage} imageEdit={selectedImageEdit} onReplaceImage={(replacementData, replacementType, replacementName) => {if(sessionRef.current.id!==session.id||sessionRef.current.revision!==session.revision||filesRef.current[0]!==file){setError('Document changed while reading the image. Select it and try again.');return}updateSelectedImage({ replacementData, replacementType, replacementName })}} onCropChange={(crop) => updateSelectedImage({ crop })} />}
+            </section></div>}
           {toolId==='edit-text'&&<small style={{maxWidth:460}}>Complex text uses visual replacement and may remain extractable. Use Redact for secrets. Resize the box for longer text.</small>}
           {toolId==='fill-forms'&&<button className="editor-open-button" onClick={async()=>{try{const expected=captureRevision(sessionRef.current,file),page=currentViewerPage,rotation=Number(viewerState.rotation)||0;const {detectPdfFormFields}=await import('../pdfEngine');const candidates=await detectPdfFormFields(file,page,rotation);assertRevision(expected,sessionRef.current,filesRef.current[0]);setFormCandidates(candidates);setMessage(candidates.length?`Review ${candidates.length} field suggestions.`:'No blank-line or checkbox candidates were found on this page.')}catch(cause){setError(cause.message)}}}>Detect fields on this page</button>}
           {toolId==='fill-forms'&&<button className="editor-open-button" onClick={()=>activateEditorTool('form-design')}>Manage fields</button>}
@@ -1380,7 +1538,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
             </div>)}
           </div>
         </div>}
-        <PdfViewer redactionMarks={redaction} onRedactionAdd={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:[...currentEditSnapshot.current.redaction,{...mark,key:crypto.randomUUID(),page:mark.page,viewerRotation:Number(viewerState.rotation)||0}]})} onRedactionChange={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.map(m=>m.key===mark.key?mark:m)})} onRedactionDelete={key=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.filter(m=>m.key!==key)})} selectedAnnotation={selectedAnnotation} onAnnotationSelect={setSelectedAnnotation} onAnnotationChange={updateAnnotation} annotationMode={toolId} annotations={[...annotations,...formCandidates.map(candidate=>({...candidate,type:'candidate',color:'#2381dd',opacity:.8}))]} annotationStyle={annotationStyle} onAnnotationAdd={items=>{if(sessionRef.current.id!==session.id||filesRef.current[0]!==file)return;const added=items.map(item=>({...item,key:item.key||crypto.randomUUID()}));commitEditSnapshot({...currentEditSnapshot.current,annotations:[...currentEditSnapshot.current.annotations,...added]});setSelectedAnnotation(added.at(-1))}} file={file} page={viewerPage} pageCount={pageCount} pageSizes={pageSizes} viewerState={viewerState} onViewerStateChange={setViewerState} onPageChange={navPage} formValues={options.fields || {}} onFormValueChange={(name, value) => setOption('fields', { ...(options.fields || {}), [name]: value })} editTextMode={textEditMode} addTextMode={toolId === 'add-text'} imageSelectMode={toolId === 'images'} textStyle={textStyle} onTextStyleActivate={setTextStyle} localFonts={localFonts} onSelectTextFont={selectTextFont} onAddTextPlaced={() => { setToolId('add-text'); setTextEditMode(false) }} onTextObjectSelected={selectTextObject} imageEdits={imageEdits} selectedImage={selectedImage} onSelectImage={selectImageObject} onImageEdit={edit=>saveImageEdit({...edit,viewerRotation:Number(viewerState.rotation)||0})} textEdits={textEdits} onTextEdit={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: [...textEdits.filter((item) => !(item.page === edit.page && item.key === edit.key)), { ...edit, viewerRotation: Number(viewerState.rotation)||0 }] })} onTextDelete={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: textEdits.filter((item) => item.page !== edit.page || item.key !== edit.key) })} />
+        <PdfViewer redactionMarks={redaction} onRedactionAdd={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:[...currentEditSnapshot.current.redaction,{...mark,key:crypto.randomUUID(),page:mark.page,viewerRotation:Number(viewerState.rotation)||0}]})} onRedactionChange={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.map(m=>m.key===mark.key?mark:m)})} onRedactionDelete={key=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.filter(m=>m.key!==key)})} selectedAnnotation={selectedAnnotation} onAnnotationSelect={setSelectedAnnotation} onAnnotationChange={updateAnnotation} annotationMode={toolId} annotations={[...annotations,...formCandidates.map(candidate=>({...candidate,type:'candidate',color:'#2381dd',opacity:.8}))]} annotationStyle={annotationStyle} onAnnotationAdd={items=>{if(sessionRef.current.id!==session.id||filesRef.current[0]!==file)return;const added=items.map(item=>({...item,key:item.key||crypto.randomUUID()}));commitEditSnapshot({...currentEditSnapshot.current,annotations:[...currentEditSnapshot.current.annotations,...added]});setSelectedAnnotation(added.at(-1))}} file={file} page={viewerPage} pageCount={pageCount} pageSizes={pageSizes} viewerState={viewerState} onViewerStateChange={setViewerState} onPageChange={navPage} formValues={options.fields || {}} onFormValueChange={(name, value) => setOption('fields', { ...(options.fields || {}), [name]: value })} editTextMode={textEditMode} addTextMode={toolId === 'add-text'} imageSelectMode={toolId === 'images'} textStyle={textStyle} onTextStyleActivate={setTextStyle} localFonts={localFonts} onSelectTextFont={selectTextFont} onAddTextPlaced={() => { setToolId('add-text'); setTextEditMode(false) }} onTextObjectSelected={selectTextObject} imageEdits={imageEdits} selectedImage={selectedImage} onSelectImage={selectImageObject} onImageOpen={openImageInspector} onImageEdit={edit=>saveImageEdit({...edit,viewerRotation:Number(viewerState.rotation)||0})} onImageDelete={deleteSelectedImage} onImageDuplicate={duplicateSelectedImage} onPlaceImage={(image,position)=>void placeImageFile(image,position)} textEdits={textEdits} onTextEdit={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: [...textEdits.filter((item) => !(item.page === edit.page && item.key === edit.key)), { ...edit, viewerRotation: Number(viewerState.rotation)||0 }] })} onTextDelete={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: textEdits.filter((item) => item.page !== edit.page || item.key !== edit.key) })} />
       </>}
 
     </section>
@@ -1403,25 +1561,6 @@ function moveFile(files, index, offset) {
   return next
 }
 
-function ImageOptions({ selectedImage, imageEdit, onReplaceImage, onCropChange }) {
-  const crop = imageEdit?.crop || { top: 0, right: 0, bottom: 0, left: 0 }
-  const sourceReady = Boolean(selectedImage?.sourceData || imageEdit?.sourceData)
-  if (!selectedImage) return <p className="option-note">Click an image on the page to select it. Drag it to move, or drag its corner to resize.</p>
-  const handleReplacement = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    onReplaceImage(new Uint8Array(await file.arrayBuffer()), file.type || 'image/png', file.name)
-    event.target.value = ''
-  }
-  const setCrop = (side, value) => onCropChange({ ...crop, [side]: Number(value) })
-  return <>
-    <span className="image-selection-summary">Image on page {selectedImage.page}</span><small>Replacement keeps placement and orientation. Moving/deleting covers the source; complex backgrounds may need redaction.</small>
-    <label className="image-replace-field">Replace image<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={handleReplacement} /></label>
-    {['top', 'right', 'bottom', 'left'].map((side) => <label className="image-crop-field" key={side}>Crop {side} · {crop[side]}%<input type="range" min="0" max="45" step="1" disabled={!sourceReady} value={crop[side] || 0} onChange={(event) => setCrop(side, event.target.value)} /></label>)}
-    {!sourceReady && !imageEdit?.replacementData && <small className="edit-text-help">Image preview is loading…</small>}
-  </>
-}
-
 function ToolOptions({ toolId, options, setOption, pageCount, formFields = [], editorPage = null }) {
   const field = (label, key, placeholder = '') => <label className="tool-field">{label}<input className="studio-input" value={options[key]} onChange={(event) => setOption(key, event.target.value)} placeholder={placeholder} /></label>
   const select = (label, key, choices) => <label className="tool-field">{label}<select className="studio-input" value={options[key]} onChange={(event) => setOption(key, event.target.value)}>{choices.map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>
@@ -1435,15 +1574,15 @@ function ToolOptions({ toolId, options, setOption, pageCount, formFields = [], e
     case 'duplicate-pages': return <>{field('Pages to duplicate', 'pages', 'Select thumbnails or enter 1, 3')}{note('Copies are appended to the end of the document.')}</>
     case 'organize-pdf': return <>{field(`Custom page order${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', '3, 1-2, 4')}{note('Use the page arrows to reorder. Repeat a number to duplicate a page, or omit it to remove it.')}</>
     case 'rotate-pages': return <>{select('Rotation', 'rotation', [[90, '90° clockwise'], [180, '180°'], [270, '270° clockwise']])}{field('Pages to rotate', 'pages', 'Leave blank for all pages')}{note('Select page thumbnails or leave the field blank to rotate all pages.')}</>
-    case 'crop-pdf': return <>{field('Pages to crop', 'pages', 'Leave blank for all pages')}{['top', 'right', 'bottom', 'left'].map((side) => <label className="tool-field" key={side}>{side} margin · mm<input className="studio-input" type="number" min="0" max="200" value={options.margins[side]} onChange={(event) => setOption('margins', { ...options.margins, [side]: Number(event.target.value) })} /></label>)}{note('Select thumbnails for specific pages, or leave the field blank to crop all.')}</>
-    case 'add-watermark': return <>{field('Watermark text', 'watermarkText', 'CONFIDENTIAL')}<label className="tool-field">Opacity · {options.opacity}%<input type="range" min="10" max="100" value={options.opacity} onChange={(event) => setOption('opacity', Number(event.target.value))} /></label>{select('Angle', 'angle', [[0, 'Horizontal'], [45, '45°'], [90, '90°']])}</>
-    case 'page-numbers': return <>{select('Position', 'position', ['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-center', 'bottom-right'].map((value) => [value, value.replace('-', ' ')]))}{field('First page number', 'startNumber', '1')}</>
+    case 'crop-pdf': return <>{field('Pages to crop', 'pages', 'Leave blank for all pages')}{select('Margin units', 'unit', [['mm', 'Millimetres'], ['pt', 'Points']])}{['top', 'right', 'bottom', 'left'].map((side) => <label className="tool-field" key={side}>{side} margin · {options.unit || 'mm'}<input className="studio-input" type="number" min="0" max={options.unit === 'pt' ? 566 : 200} value={options.margins[side]} onChange={(event) => setOption('margins', { ...options.margins, [side]: Number(event.target.value) })} /></label>)}{note('Select thumbnails for specific pages, or leave the field blank to crop all.')}</>
+    case 'add-watermark': return <>{field('Watermark text', 'watermarkText', 'CONFIDENTIAL')}{field(`Pages to watermark${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', 'Leave blank for all pages') }<label className="tool-field">Opacity · {options.opacity}%<input type="range" min="10" max="100" value={options.opacity} onChange={(event) => setOption('opacity', Number(event.target.value))} /></label>{select('Angle', 'angle', [[0, 'Horizontal'], [45, '45°'], [90, '90°']])}</>
+    case 'page-numbers': return <>{field(`Pages to number${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', 'Leave blank for all pages')}{select('Position', 'position', ['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-center', 'bottom-right'].map((value) => [value, value.replace('-', ' ')]))}{field('First page number', 'startNumber', '1')}{field('Number format', 'format', '{n} / {total}')}{note('Use {n} for the page number and {total} for the document page count.')}</>
     case 'compress-pdf': return <>{select('Compression mode', 'quality', [['lossless', 'Lossless · preserve page content'], ['high', 'High visual quality'], ['recommended', '70% target · preserve PDF features'], ['small', 'Smallest file']])}{note(options.quality === 'lossless' ? 'Compresses text and font streams, combines duplicate resources, and removes unused objects without changing image quality.' : options.quality === 'recommended' ? 'Targets 70% smaller while preserving selectable text, search, links, and interactive forms. Only embedded image quality and document resources are optimized. Actual reduction depends on the file; some PDFs cannot reach 70% without losing features.' : 'All modes preserve selectable text, search, links, forms, and page layout. High visual quality keeps more image detail; Smallest file uses stronger image compression.')}</>
-    case 'pdf-to-jpg': return <>{select('Image format', 'format', [['jpg', 'JPEG'], ['png', 'PNG']])}{select('Resolution', 'dpi', [[72, '72 DPI'], [108, '108 DPI'], [144, '144 DPI'], [216, '216 DPI']])}</>
+    case 'pdf-to-jpg': return <>{select('Image format', 'format', [['jpg', 'JPEG'], ['png', 'PNG']])}{select('Resolution', 'dpi', [[72, '72 DPI'], [108, '108 DPI'], [144, '144 DPI'], [216, '216 DPI']])}{options.format !== 'png' && <label className="tool-field">JPEG quality · {Math.round((Number(options.quality) || 0.82) * 100)}%<input type="range" min="25" max="100" value={Math.round((Number(options.quality) || 0.82) * 100)} onChange={(event) => setOption('quality', Number(event.target.value) / 100)} /></label>}</>
     case 'jpg-to-pdf': return <>{select('Page size', 'pageSize', [['a4', 'A4'], ['letter', 'Letter'], ['fit', 'Fit to image']])}{note('Each selected image becomes one PDF page.')}</>
     case 'ocr-pdf': return <>{select('OCR language', 'language', OCR_LANGUAGES)}{select('Recognition quality', 'ocrDpi', [[150, 'Fast · 150 DPI'], [200, 'Balanced · 200 DPI'], [300, 'High · 300 DPI']])}{note('Adds an invisible searchable text layer over scanned pages in the original PDF. The page appearance stays the same. OCR runs on this device; English OCR is bundled for offline use. Other languages require a local language pack in the ocr assets directory.')}</>
     case 'pdf-to-word': return <>{select('OCR language for scanned pages', 'language', OCR_LANGUAGES)}{note('Exports editable text with approximate font styling and placement. Scanned pages are recognized with OCR; complex layouts may need cleanup in Word.')}</>
-    case 'pdf-to-pptx': return note('Creates one slide per PDF page. Selectable PDF text becomes editable text boxes; page artwork and complex vector objects remain in the background image.')
+    case 'pdf-to-pptx': return <>{select('OCR language for scanned pages', 'language', OCR_LANGUAGES)}{select('OCR quality', 'ocrDpi', [[150, 'Fast · 150 DPI'], [200, 'Balanced · 200 DPI'], [300, 'High · 300 DPI']])}{note('Builds editable text, detected bullets, embedded images, and simple lines and rectangles. Scanned pages use OCR. Whole-page screenshots are never added; complex vector paths, patterns, and gradients may be omitted.')}</>
     case 'word-to-pdf': return note('Converts DOCX text and paragraphs to PDF. Original page layout, images, and advanced styling may not be preserved.')
     case 'powerpoint-to-pdf': return note('Converts .pptx presentations locally. Save legacy .ppt files as .pptx in PowerPoint or LibreOffice before converting.')
     case 'flatten-pdf': return note('Flattens interactive form fields into the page appearance.')
@@ -1509,7 +1648,7 @@ function RedactionPreview({ file, page, redaction, onMark }) {
   return <div className="redaction-preview-panel"><strong>Mark redaction on page {page}</strong><div className="redaction-canvas-wrap" style={{width:560,maxWidth:'100%'}}><canvas ref={canvas} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} />{visibleMarks.map((mark, index) => { const visible = { redactX: mark.redactX ?? mark.x, redactY: mark.redactY ?? mark.y, redactWidth: mark.redactWidth ?? mark.width, redactHeight: mark.redactHeight ?? mark.height }; return visible.redactWidth > 0 && visible.redactHeight > 0 ? <div key={index} className="redaction-mask-preview" style={{ left: `${visible.redactX * 100}%`, top: `${visible.redactY * 100}%`, width: `${visible.redactWidth * 100}%`, height: `${visible.redactHeight * 100}%` }} /> : null })}</div>{error && <p className="form-error">{error}</p>}<small>Drag a rectangle over the confidential content.</small></div>
 }
 
-function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, page, pageCount, pageSizes = [], viewerState = {}, onViewerStateChange = () => {}, onPageChange, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, onTextObjectSelected = () => {}, imageEdits = [], selectedImage, onSelectImage = () => {}, onImageEdit = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {} }) {
+function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, page, pageCount, pageSizes = [], viewerState = {}, onViewerStateChange = () => {}, onPageChange, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, onTextObjectSelected = () => {}, imageEdits = [], selectedImage, onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {} }) {
   const pageContainer = useRef(null)
   const pageNodes = useRef([])
   const pendingZoomAnchor = useRef(null)
@@ -1523,7 +1662,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const [rotation, setRotation] = useState(() => ((Number(viewerState.rotation) || 0) % 360 + 360) % 360)
   const [darkPage, setDarkPage] = useState(() => Boolean(viewerState.darkPage))
   const [sidebarTab, setSidebarTab] = useState(() => ['pages', 'outline', 'search'].includes(viewerState.sidebarTab) ? viewerState.sidebarTab : 'pages')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(viewerState.sidebarCollapsed))
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(viewerState.sidebarCollapsed) || (typeof window !== 'undefined' && window.matchMedia('(max-width: 560px)').matches))
   const [searchQuery, setSearchQuery] = useState(() => viewerState.searchQuery || '')
   const [searchOptions, setSearchOptions] = useState(() => viewerState.searchOptions || { caseSensitive: false, wholeWord: false, regex: false })
   const [searchResults, setSearchResults] = useState([])
@@ -2031,7 +2170,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
                 const pageResults = searchHighlights.get(item.pageNumber) || []
                 const actualVisible = entry.top + entry.height >= lastScrollTop.current && entry.top <= lastScrollTop.current + pageBox.height
                 const priority = actualVisible ? (item.pageNumber === page ? 0 : 1) : item.pageNumber > page ? 2 : 3
-                return <PdfViewerPage selectedAnnotation={selectedAnnotation} onAnnotationSelect={onAnnotationSelect} onAnnotationChange={onAnnotationChange} redactionMarks={redactionMarks.filter(m=>m.page===item.pageNumber)} onRedactionAdd={mark=>onRedactionAdd?.({...mark,page:item.pageNumber})} onRedactionChange={onRedactionChange} onRedactionDelete={onRedactionDelete} annotationMode={annotationMode} annotations={annotations.filter(a=>a.page===item.pageNumber)} annotationStyle={annotationStyle} onAnnotationAdd={onAnnotationAdd} key={`${pageKey}-${item.pageNumber}`} file={file} pageNumber={item.pageNumber} pageSize={item.size} displayWidth={item.width} displayHeight={item.height} pageNodes={pageNodes} root={pageContainer} zoom={zoom} rotation={rotation} renderQuality={isInteracting ? 'preview' : 'full'} renderPriority={priority} formValues={formValues} onFormValueChange={onFormValueChange} editTextMode={editTextMode} addTextMode={addTextMode} imageSelectMode={imageSelectMode} selectedImage={selectedImage} imageEdits={imageEdits.filter((edit) => edit.page === item.pageNumber)} onSelectImage={onSelectImage} onImageEdit={onImageEdit} onTextObjectSelected={onTextObjectSelected} textStyle={textStyle} onTextStyleActivate={onTextStyleActivate} localFonts={localFonts} onSelectTextFont={onSelectTextFont} onAddTextPlaced={onAddTextPlaced} textEdits={textEdits.filter((edit) => edit.page === item.pageNumber)} onTextEdit={onTextEdit} onTextDelete={onTextDelete} selectedTextBox={selectedTextBox} onSelectTextBox={setSelectedTextBox} searchRects={pageResults} onNavigateInternal={changePage} />
+                return <PdfViewerPage selectedAnnotation={selectedAnnotation} onAnnotationSelect={onAnnotationSelect} onAnnotationChange={onAnnotationChange} redactionMarks={redactionMarks.filter(m=>m.page===item.pageNumber)} onRedactionAdd={mark=>onRedactionAdd?.({...mark,page:item.pageNumber})} onRedactionChange={onRedactionChange} onRedactionDelete={onRedactionDelete} annotationMode={annotationMode} annotations={annotations.filter(a=>a.page===item.pageNumber)} annotationStyle={annotationStyle} onAnnotationAdd={onAnnotationAdd} key={`${pageKey}-${item.pageNumber}`} file={file} pageNumber={item.pageNumber} pageSize={item.size} displayWidth={item.width} displayHeight={item.height} pageNodes={pageNodes} root={pageContainer} zoom={zoom} rotation={rotation} renderQuality={isInteracting ? 'preview' : 'full'} renderPriority={priority} formValues={formValues} onFormValueChange={onFormValueChange} editTextMode={editTextMode} addTextMode={addTextMode} imageSelectMode={imageSelectMode} selectedImage={selectedImage} imageEdits={imageEdits.filter((edit) => edit.page === item.pageNumber)} onSelectImage={onSelectImage} onImageOpen={onImageOpen} onImageEdit={onImageEdit} onImageDelete={onImageDelete} onImageDuplicate={onImageDuplicate} onPlaceImage={onPlaceImage} onTextObjectSelected={onTextObjectSelected} textStyle={textStyle} onTextStyleActivate={onTextStyleActivate} localFonts={localFonts} onSelectTextFont={onSelectTextFont} onAddTextPlaced={onAddTextPlaced} textEdits={textEdits.filter((edit) => edit.page === item.pageNumber)} onTextEdit={onTextEdit} onTextDelete={onTextDelete} selectedTextBox={selectedTextBox} onSelectTextBox={setSelectedTextBox} searchRects={pageResults} onNavigateInternal={changePage} />
               })}
             </div>
           </div>)}
@@ -2103,27 +2242,175 @@ async function capturePdfImageRegion(pageCanvas, region) {
   return new Promise((resolve) => copy.toBlob(resolve, 'image/png'))
 }
 
-function PdfImageObject({ pageNumber, pageCanvas, region, imageEdit, selected, selectedImage, onSelect, onChange }) {
+/** Read the artwork of a PDF image so it can be redrawn from the original
+ * pixels. The PDF transform is baked into the capture, so a rotated or skewed
+ * source keeps its orientation and no transform is applied twice. */
+async function captureImageSource(file, pageNumber, region, pageCanvas, pageSize) {
+  if (region?.sourceId && Array.isArray(region.combined)) {
+    try {
+      const { capturePdfImageSource } = await import('../pdfEngine')
+      return await capturePdfImageSource(file, pageNumber, region.sourceId, region.combined)
+    } catch (error) {
+      console.warn('PDF Dock could not decode the PDF image:', error)
+    }
+  }
+  const shot = await capturePdfImageRegion(pageCanvas, region)
+  if (!shot) throw new Error('This image could not be read from the page.')
+  return {
+    data: new Uint8Array(await shot.arrayBuffer()),
+    type: 'image/png',
+    width: Math.max(1, Math.round((region.width || 0.1) * (pageSize?.width || 612))),
+    height: Math.max(1, Math.round((region.height || 0.1) * (pageSize?.height || 792))),
+  }
+}
+
+/** Colour of the page around an image, used to cover the area it came from. */
+function sampleCoverColor(pageCanvas, quad, pageSize) {
+  try {
+    if (!pageCanvas || !pageCanvas.width || !quad || quad.length !== 4) return '#FFFFFF'
+    const context = pageCanvas.getContext('2d', { willReadFrequently: true })
+    if (!context) return '#FFFFFF'
+    const scaleX = pageCanvas.width / (pageSize?.width || pageCanvas.width)
+    const scaleY = pageCanvas.height / (pageSize?.height || pageCanvas.height)
+    const points = quad.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY }))
+    const center = points.reduce((sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }), { x: 0, y: 0 })
+    const samples = []
+    for (let index = 0; index < 4; index += 1) {
+      const a = points[index]
+      const b = points[(index + 1) % 4]
+      const midX = (a.x + b.x) / 2
+      const midY = (a.y + b.y) / 2
+      const length = Math.hypot(midX - center.x, midY - center.y) || 1
+      const ox = Math.round(midX + ((midX - center.x) / length) * 4)
+      const oy = Math.round(midY + ((midY - center.y) / length) * 4)
+      if (ox < 0 || oy < 0 || ox >= pageCanvas.width || oy >= pageCanvas.height) continue
+      const pixel = context.getImageData(ox, oy, 1, 1).data
+      samples.push([pixel[0], pixel[1], pixel[2]])
+    }
+    if (!samples.length) return '#FFFFFF'
+    const median = (channel) => {
+      const values = samples.map((sample) => sample[channel]).sort((left, right) => left - right)
+      return values[Math.floor(values.length / 2)]
+    }
+    return `#${[0, 1, 2].map((channel) => median(channel).toString(16).padStart(2, '0')).join('')}`
+  } catch {
+    return '#FFFFFF'
+  }
+}
+
+const clampUnit = (value, max) => Math.max(0, Math.min(Math.max(0, max), Number(value) || 0))
+
+/** Move or resize an image rectangle in normalized page coordinates. */
+function imageGestureRect(initial, mode, dx, dy, locked, frame, edit) {
+  if (mode === 'move')
+    return {
+      x: clampUnit(initial.x + dx, 1 - initial.width),
+      y: clampUnit(initial.y + dy, 1 - initial.height),
+      width: initial.width,
+      height: initial.height,
+    }
+  let { x, y, width, height } = initial
+  if (mode.includes('e')) width = initial.width + dx
+  if (mode.includes('w')) {
+    width = initial.width - dx
+    x = initial.x + dx
+  }
+  if (mode.includes('s')) height = initial.height + dy
+  if (mode.includes('n')) {
+    height = initial.height - dy
+    y = initial.y + dy
+  }
+  width = Math.max(0.02, width)
+  height = Math.max(0.02, height)
+  if (locked) {
+    const pageAspect = (frame?.width || 1) / (frame?.height || 1)
+    const aspect = contentAspectFor(edit, pageAspect)
+    if (mode === 'e' || mode === 'w') height = Math.max(0.02, (width * pageAspect) / (aspect || 1))
+    else width = Math.max(0.02, (height * (aspect || 1)) / (pageAspect || 1))
+    if (mode.includes('w')) x = initial.x + initial.width - width
+    if (mode.includes('n')) y = initial.y + initial.height - height
+  }
+  width = Math.min(width, 1)
+  height = Math.min(height, 1)
+  return { x: clampUnit(x, 1 - width), y: clampUnit(y, 1 - height), width, height }
+}
+
+function contentAspectFor(edit, pageAspect) {
+  const width = Number(edit?.sourceWidth) || null
+  const height = Number(edit?.sourceHeight) || null
+  const window = cropWindow(edit?.crop)
+  if (width && height) return (width * window.width) / (height * window.height)
+  return ((Number(edit?.width) || 0.01) * pageAspect) / (Number(edit?.height) || 0.01)
+}
+
+function PdfImageObject({ file, pageNumber, pageCanvas, pageSize, region, imageEdit, selected, selectedImage, onSelect, onOpen, onChange, onDelete, onDuplicate, pageWidth = 0, pageHeight = 0, candidate = false }) {
   const [preview, setPreview] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const gesture = useRef(null)
-  useEffect(()=>setPreview(null),[imageEdit])
-  const geometry = preview || imageEdit || region
-  const selectedData = selectedImage?.page === pageNumber && selectedImage?.key === region.key ? selectedImage.sourceData : null
-  const select = (sourceData) => onSelect({ ...region, ...imageEdit, page: pageNumber, original: imageEdit?.original || region, sourceData: sourceData || imageEdit?.sourceData || selectedData || null })
+  const capture = useRef(null)
+  const base = imageEdit || region
+  const geometry = preview ? { ...base, ...preview } : base
+  const selectedSource = selectedImage?.page === pageNumber && selectedImage?.key === region.key ? selectedImage.sourceData : null
+  const sourceData = imageEdit?.replacementData || imageEdit?.sourceData || selectedSource || null
+  const locked = imageEdit ? imageEdit.aspectLocked !== false : true
 
   useEffect(() => {
-    const source = imageEdit?.replacementData || imageEdit?.sourceData || selectedData
-    if (!source) { setPreviewUrl(''); return undefined }
-    let url,active=true
-    const job=new AbortController()
-    prepareImageOperations([{...region,...imageEdit,type:'image',sourceData:source}],job.signal).then(([prepared])=>{
-      if(!active)return
-      const data=prepared.replacementData||prepared.sourceData
-      url=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:prepared.replacementType||'image/png'}));setPreviewUrl(url)
-    }).catch(()=>{if(active)setPreviewUrl('')})
-    return () => {active=false;job.abort();if(url)URL.revokeObjectURL(url)}
-  }, [imageEdit?.replacementData,imageEdit?.replacementType,imageEdit?.sourceData,JSON.stringify(imageEdit?.crop),selectedData])
+    if (!sourceData) {
+      setPreviewUrl('')
+      return undefined
+    }
+    const blob = sourceData instanceof Blob ? sourceData : new Blob([sourceData], { type: imageEdit?.replacementType || 'image/png' })
+    const url = URL.createObjectURL(blob)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [sourceData, imageEdit?.replacementType])
+
+  const selection = (captured) => ({
+    ...region,
+    ...imageEdit,
+    page: pageNumber,
+    original: imageEdit?.original || region,
+    originalQuad: imageEdit?.originalQuad || region.quad,
+    sourceData: captured || imageEdit?.sourceData || selectedSource || null,
+    sourceWidth: imageEdit?.sourceWidth ?? region.sourceWidth ?? null,
+    sourceHeight: imageEdit?.sourceHeight ?? region.sourceHeight ?? null,
+    aspectLocked: (imageEdit || region).aspectLocked !== false,
+  })
+
+  const select = (captured) => onSelect(selection(captured))
+
+  const ensureSource = () => {
+    /* The artwork is read once. A second click, a double click or a drag must
+     * not decode the same image again. */
+    if (sourceData || imageEdit?.replacementData) return null
+    if (capture.current) return capture.current
+    capture.current = captureImageSource(file, pageNumber, region, pageCanvas, pageSize)
+      .then((captured) => select(captured.data))
+      .catch((error) => {
+        console.warn('PDF Dock could not read this image:', error)
+        return null
+      })
+      .finally(() => { capture.current = null })
+    return capture.current
+  }
+
+  /* A double click opens the image inspector. It must never move, duplicate or
+   * transform the image, so the pointer gesture that came with it is dropped
+   * here instead of being committed when the pointer is released. */
+  const open = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const plan = imageDoubleClickPlan({
+      sourceLoaded: Boolean(sourceData || imageEdit?.replacementData),
+      capturePending: Boolean(capture.current),
+    })
+    if (plan.cancelGesture) gesture.current = null
+    if (plan.clearPreview) setPreview(null)
+    const image = selection(null)
+    if (plan.select && !selected) onSelect(image)
+    if (plan.openInspector) onOpen?.(image)
+    if (plan.captureSource) void ensureSource()
+  }
 
   const start = (event, mode = 'move') => {
     event.preventDefault()
@@ -2131,9 +2418,17 @@ function PdfImageObject({ pageNumber, pageCanvas, region, imageEdit, selected, s
     const bounds = pageCanvas?.getBoundingClientRect()
     if (!bounds) return
     event.currentTarget.setPointerCapture?.(event.pointerId)
-    gesture.current = { pointerId: event.pointerId, mode, startX: event.clientX, startY: event.clientY, bounds, initial: { x: geometry.x, y: geometry.y, width: geometry.width, height: geometry.height }, moved: false }
-    select()
-    if (!imageEdit?.sourceData && !imageEdit?.replacementData && !selectedData) void capturePdfImageRegion(pageCanvas, region).then(select)
+    gesture.current = {
+      pointerId: event.pointerId,
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      bounds,
+      initial: { x: geometry.x, y: geometry.y, width: geometry.width, height: geometry.height },
+      moved: false,
+    }
+    if (!selected) select()
+    void ensureSource()
   }
 
   const move = (event) => {
@@ -2143,10 +2438,7 @@ function PdfImageObject({ pageNumber, pageCanvas, region, imageEdit, selected, s
     const dy = (event.clientY - active.startY) / active.bounds.height
     if (Math.abs(dx) + Math.abs(dy) < 0.002) return
     active.moved = true
-    let next
-    if (active.mode === 'resize') next = { ...active.initial, width: Math.max(0.015, Math.min(1 - active.initial.x, active.initial.width + dx)), height: Math.max(0.015, Math.min(1 - active.initial.y, imageEdit?.freeResize ? active.initial.height+dy : (active.initial.width+dx)*active.initial.height/active.initial.width)) }
-    else next = { ...active.initial, x: Math.max(0, Math.min(1 - active.initial.width, active.initial.x + dx)), y: Math.max(0, Math.min(1 - active.initial.height, active.initial.y + dy)) }
-    setPreview(next)
+    setPreview(imageGestureRect(active.initial, active.mode, dx, dy, locked, { width: pageSize?.width || 612, height: pageSize?.height || 792 }, base))
   }
 
   const finish = async (event) => {
@@ -2154,27 +2446,114 @@ function PdfImageObject({ pageNumber, pageCanvas, region, imageEdit, selected, s
     if (!active || active.pointerId !== event.pointerId) return
     gesture.current = null
     if (!active.moved || !preview) return
-    const sourceData = imageEdit?.sourceData || imageEdit?.replacementData || selectedData || await capturePdfImageRegion(pageCanvas, region)
-    const edit = { ...region, page: pageNumber, original: region, ...imageEdit, ...preview, sourceData, crop: imageEdit?.crop || { top: 0, right: 0, bottom: 0, left: 0 } }
+    const captured = sourceData || (await captureImageSource(file, pageNumber, region, pageCanvas, pageSize).catch(() => null))?.data
+    const edit = {
+      ...region,
+      ...imageEdit,
+      ...preview,
+      page: pageNumber,
+      original: imageEdit?.original || region,
+      originalQuad: imageEdit?.originalQuad || region.quad,
+      sourceData: captured || imageEdit?.sourceData || null,
+      sourceWidth: imageEdit?.sourceWidth ?? region.sourceWidth ?? null,
+      sourceHeight: imageEdit?.sourceHeight ?? region.sourceHeight ?? null,
+      aspectLocked: (imageEdit || region).aspectLocked !== false,
+      crop: imageEdit?.crop || { top: 0, right: 0, bottom: 0, left: 0 },
+    }
     onChange(edit)
+    /* The committed geometry now lives in the edit: a stale preview would mask
+     * every later change made in the inspector. */
+    setPreview(null)
   }
 
-  return <div className={`pdf-image-object ${selected ? 'selected' : ''} ${imageEdit ? 'edited' : ''}`} role="button" tabIndex={0} aria-label={`Image ${region.key.replace('image-', '')} on page ${pageNumber}`} title="Select image; drag to move" style={{ left: `${geometry.x * 100}%`, top: `${geometry.y * 100}%`, width: `${geometry.width * 100}%`, height: `${geometry.height * 100}%` }} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select() } }}>
-    {imageEdit?.deleted&&<span style={{position:'absolute',inset:0,background:'#fff'}}/>}
-    {previewUrl&&!imageEdit?.deleted && <ImagePlacementPreview url={previewUrl} geometry={geometry} operation={{...region,...imageEdit,...geometry,original:imageEdit?.original||region}} pageCanvas={pageCanvas}/>}
+  const handleKey = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      select()
+      return
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault()
+      onDelete?.()
+      return
+    }
+    const step = event.shiftKey ? 0.02 : 0.005
+    const nudges = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }
+    const nudge = nudges[event.key]
+    if (!nudge) return
+    event.preventDefault()
+    const width = geometry.width
+    const height = geometry.height
+    const target = {
+      x: clampUnit(geometry.x + nudge[0], 1 - width),
+      y: clampUnit(geometry.y + nudge[1], 1 - height),
+    }
+    /* A nudge is a real edit, so it carries the page and the source artwork.
+     * Without them the edit cannot be written back to the PDF. */
+    const commit = (captured) => onChange({
+      ...base,
+      ...target,
+      page: pageNumber,
+      original: imageEdit?.original || region,
+      originalQuad: imageEdit?.originalQuad || region.quad,
+      sourceData: captured || imageEdit?.sourceData || sourceData || null,
+      sourceWidth: imageEdit?.sourceWidth ?? region.sourceWidth ?? null,
+      sourceHeight: imageEdit?.sourceHeight ?? region.sourceHeight ?? null,
+      aspectLocked: (imageEdit || region).aspectLocked !== false,
+    })
+    if (sourceData) { commit(null); return }
+    void captureImageSource(file, pageNumber, region, pageCanvas, pageSize)
+      .then((captured) => commit(captured?.data || null))
+      .catch(() => commit(null))
+  }
 
+  return <div
+    className={`pdf-image-object ${selected ? 'selected' : ''} ${imageEdit ? 'edited' : ''} ${candidate && !selected ? 'is-candidate' : ''}`}
+    role="button"
+    tabIndex={0}
+    aria-label={`Image ${region.key.replace('image-', '')} on page ${pageNumber}; double-click to edit`}
+    title="Select image; drag to move; drag a handle to resize; arrow keys nudge; double-click to edit"
+    style={{ left: `${geometry.x * 100}%`, top: `${geometry.y * 100}%`, width: `${geometry.width * 100}%`, height: `${geometry.height * 100}%` }}
+    onPointerDown={start}
+    onPointerMove={move}
+    onPointerUp={finish}
+    onPointerCancel={finish}
+    onDoubleClick={open}
+    onKeyDown={handleKey}
+  >
+    {previewUrl && <ImagePlacementPreview url={previewUrl} edit={geometry} frame={{ width: pageSize?.width || 612, height: pageSize?.height || 792 }} pageWidth={pageWidth} pageHeight={pageHeight} />}
     {selected && <span className="pdf-image-object-label">Image</span>}
-    {selected && <button type="button" className="pdf-image-resize-handle" title="Resize image" aria-label="Resize image" onPointerDown={(event) => start(event, 'resize')} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} />}
+    {selected && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span
+      key={edge}
+      className={`pdf-image-box-resize edge-${edge}`}
+      role="presentation"
+      onPointerDown={(event) => { event.stopPropagation(); start(event, edge) }}
+      onPointerMove={move}
+      onPointerUp={finish}
+      onPointerCancel={finish}
+    />)}
   </div>
 }
 
-function ImagePlacementPreview({url,geometry,operation,pageCanvas}) {
-  const bounds=pageCanvas?.getBoundingClientRect()||{width:816,height:1056}
-  const frame={width:bounds.width,height:bounds.height}
-  const box=displayRect(frame,geometry),m=imagePlacement(frame,operation)
-  // SVG uses image top-left; PDF image unit space uses bottom-left.
-  const matrix=[m[0],-m[1],-m[2],m[3],m[4]+m[2]-box.x,box.y+box.height-m[5]-m[3]]
-  return <svg viewBox={`0 0 ${box.width} ${box.height}`} preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'}}><image href={url} width="1" height="1" preserveAspectRatio="none" transform={`matrix(${matrix.join(' ')})`}/></svg>
+function ImagePlacementPreview({ url, edit, frame, pageWidth, pageHeight }) {
+  const width = pageWidth || 816
+  const height = pageHeight || 1056
+  // The same placement matrix the PDF writer uses, mapped into page pixels.
+  const matrix = multiplyMatrices([width, 0, 0, height, 0, 0], imageSvgMatrix(edit, frame))
+  const rect = normalizeImageEdit(edit)
+  return <svg
+    viewBox={`0 0 ${width} ${height}`}
+    preserveAspectRatio="none"
+    style={{
+      position: 'absolute',
+      left: `${(-rect.x / Math.max(rect.width, 0.001)) * 100}%`,
+      top: `${(-rect.y / Math.max(rect.height, 0.001)) * 100}%`,
+      width: `${width}px`,
+      height: `${height}px`,
+      pointerEvents: 'none',
+      overflow: 'hidden',
+    }}
+  ><image href={url} width="1" height="1" preserveAspectRatio="none" transform={`matrix(${matrix.join(' ')})`} /></svg>
 }
 
 const editableTextGroupCache = new WeakMap()
@@ -2675,7 +3054,7 @@ function renderStyledText(text, ranges, displayHeight, pageHeight, defaults) {
   })
 }
 
-function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, pageNumber, pageSize, displayWidth, displayHeight, pageNodes, root, zoom = 1, rotation = 0, renderQuality = 'full', renderPriority = 2, searchRects = [], onNavigateInternal = () => {}, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, selectedImage, imageEdits = [], onSelectImage = () => {}, onImageEdit = () => {}, onTextObjectSelected = () => {}, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {}, selectedTextBox, onSelectTextBox = () => {} }) {
+function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, pageNumber, pageSize, displayWidth, displayHeight, pageNodes, root, zoom = 1, rotation = 0, renderQuality = 'full', renderPriority = 2, searchRects = [], onNavigateInternal = () => {}, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, selectedImage, imageEdits = [], onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, onTextObjectSelected = () => {}, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {}, selectedTextBox, onSelectTextBox = () => {} }) {
   const wrapper = useRef(null)
   const canvas = useRef(null)
     const textLayer = useRef(null)
@@ -2735,7 +3114,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
   useEffect(() => {
     const previous = lastTextStyle.current || {}
     lastTextStyle.current = textStyle
-    const changed = Object.fromEntries(['fontFamily', 'fontSize', 'fontData', 'color', 'bold', 'italic'].filter((key) => previous[key] !== textStyle?.[key]).map((key) => [key, textStyle[key]]))
+    const changed = Object.fromEntries(['fontFamily', 'fontSize', 'fontData', 'color', 'bold', 'italic', 'alignment', 'lineHeight', 'letterSpacingPt', 'opacity'].filter((key) => previous[key] !== textStyle?.[key]).map((key) => [key, textStyle[key]]))
     if (!Object.keys(changed).length) return
     setActiveTextEdit((current) => {
       if (!current) return current
@@ -2746,6 +3125,10 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
         ...('color' in changed ? { color: changed.color } : {}),
         ...('bold' in changed ? { fontWeight: changed.bold ? '700' : '400', previewFontFamily: '' } : {}),
         ...('italic' in changed ? { fontStyle: changed.italic ? 'italic' : 'normal', previewFontFamily: '' } : {}),
+        ...('alignment' in changed ? { alignment: changed.alignment } : {}),
+        ...('lineHeight' in changed ? { lineHeightScale: (Number(current.fontSize) || 14) / (pageSize?.height || 792) * changed.lineHeight } : {}),
+        ...('letterSpacingPt' in changed ? { letterSpacingPt: changed.letterSpacingPt } : {}),
+        ...('opacity' in changed ? { opacity: changed.opacity / 100 } : {}),
       }
       const start = current.selectionStart ?? 0
       const end = current.selectionEnd ?? 0
@@ -2786,7 +3169,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
       const fontScale = Number(textStyle?.fontSize || 14) / (pageSize?.height || 792)
       const height = Math.min(0.4, Math.max(0.045, fontScale * 2.4))
       const y = Math.max(0.02, Math.min(1 - height, (event.clientY - pageBounds.top) / pageBounds.height))
-      setActiveTextEdit({ key: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`, oldText: '', isNew: true, x, y, width, height, initialHeight: height, fontData:textStyle?.fontData, fontFamily: textStyle?.fontFamily || 'Helvetica', fontWeight: textStyle?.bold ? '700' : '400', fontStyle: textStyle?.italic ? 'italic' : 'normal', color: textStyle?.color || '#111111', fontScale, lineHeightScale: fontScale * 1.2, value: '' })
+      setActiveTextEdit({ key: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`, oldText: '', isNew: true, x, y, width, height, initialHeight: height, fontData:textStyle?.fontData, fontFamily: textStyle?.fontFamily || 'Helvetica', fontWeight: textStyle?.bold ? '700' : '400', fontStyle: textStyle?.italic ? 'italic' : 'normal', color: textStyle?.color || '#111111', opacity: (textStyle?.opacity ?? 100) / 100, alignment: textStyle?.alignment || 'left', letterSpacingPt: textStyle?.letterSpacingPt || 0, fontScale, lineHeightScale: fontScale * (textStyle?.lineHeight || 1.2), value: '' })
       onAddTextPlaced()
       return
     }
@@ -3101,7 +3484,18 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
   const activeInputLayout = activeDisplayEdit ? getTextEditDisplayLayout(activeDisplayEdit, pageWidth, pageHeight) : null
   const selectedToolbarEdit = resolvedSelectedText || (selectedTextBox?.page === pageNumber ? textEdits.find(edit => edit.key === selectedTextBox.key && edit.page === pageNumber) : null)
   const selectedToolbarLayout = selectedToolbarEdit ? getTextEditDisplayLayout(selectedToolbarEdit, pageWidth, pageHeight) : null
-  return <div className="acrobat-document-page" style={{ aspectRatio, width: `${displayWidth || pageSize?.width * zoom * (96 / 72) || 816}px`, height: `${displayHeight || pageSize?.height * zoom * (96 / 72) || 1056}px` }} ref={(node) => { wrapper.current = node; pageNodes.current[pageNumber - 1] = node }} onPointerDown={handlePagePointerDown}>
+  const handleImageDrop = (event) => {
+    const dropped = [...(event.dataTransfer?.files || [])].find((entry) => /^image\/(png|jpeg)$/i.test(entry.type))
+    if (!dropped) return
+    event.preventDefault()
+    event.stopPropagation()
+    const bounds = wrapper.current?.getBoundingClientRect()
+    const x = bounds?.width ? (event.clientX - bounds.left) / bounds.width : 0.5
+    const y = bounds?.height ? (event.clientY - bounds.top) / bounds.height : 0.5
+    onPlaceImage?.(dropped, { page: pageNumber, x, y })
+  }
+
+  return <div className="acrobat-document-page" style={{ aspectRatio, width: `${displayWidth || pageSize?.width * zoom * (96 / 72) || 816}px`, height: `${displayHeight || pageSize?.height * zoom * (96 / 72) || 1056}px` }} ref={(node) => { wrapper.current = node; pageNodes.current[pageNumber - 1] = node }} onPointerDown={handlePagePointerDown} onDragOver={(event) => { if ([...(event.dataTransfer?.types || [])].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={handleImageDrop}>
     {snapGuides.map((guide, index) => <span key={`${guide.axis}-${index}`} className={`pdf-text-snap-guide ${guide.axis}`} style={guide.axis === 'vertical' ? { left: `${guide.position * 100}%` } : { top: `${guide.position * 100}%` }} aria-hidden="true" />)}
     {!rendered && !canvas.current?.dataset.painted && <div className="acrobat-page-placeholder" aria-hidden="true" />}
     <canvas ref={canvas} className={rendered ? 'is-rendered' : canvas.current?.dataset.painted ? 'is-stale' : 'is-pending'} aria-label={`PDF page ${pageNumber}`} />
@@ -3113,21 +3507,27 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
       onAnnotationChange?.({...item,...(points?{points}:{})})
     }} label="Mark" fill="transparent"/>}
     <AnnotationLayer page={pageNumber} mode={annotationMode} items={annotations.filter(a=>!a.deleted&&a.type!=='form-update')} style={{...annotationStyle,pageWidth:pageSize?.width}} onAdd={onAnnotationAdd||(()=>{})} rotation={rotation} pageNode={wrapper}/>
-    {imageEdits.filter(edit=>!edit.isNew).map(edit=><span key={`image-cover-${edit.key}`} style={{position:'absolute',zIndex:3,pointerEvents:'none',background:edit.backgroundColor||'#fff',left:`${(edit.original||edit).x*100}%`,top:`${(edit.original||edit).y*100}%`,width:`${(edit.original||edit).width*100}%`,height:`${(edit.original||edit).height*100}%`}}/>)}
-    <div className="pdf-image-object-layer">{imageEdits.filter(edit=>(edit.isNew||!imageSelectMode)&&!edit.deleted).map(edit=><PdfImageObject key={edit.key} pageNumber={pageNumber} pageCanvas={canvas.current} region={edit} imageEdit={edit} selected={selectedImage?.key===edit.key} selectedImage={selectedImage} onSelect={onSelectImage} onChange={onImageEdit}/>)}</div>
+    <div className="pdf-image-cover-layer" aria-hidden="true">{imageEdits.filter(edit => !edit.isNew).map(edit => {
+      const quad = edit.originalQuad
+      if (Array.isArray(quad) && quad.length === 4)
+        return <svg key={`cover-${edit.key}`} className="pdf-image-cover" viewBox="0 0 1 1" preserveAspectRatio="none"><polygon points={quad.map((point) => `${point.x},${point.y}`).join(' ')} fill={edit.backgroundColor || '#FFFFFF'} /></svg>
+      const rect = edit.original || edit
+      return <span key={`cover-${edit.key}`} className="pdf-image-cover" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%`, background: edit.backgroundColor || '#FFFFFF' }} />
+    })}</div>
+    <div className="pdf-image-object-layer">{imageEdits.filter(edit=>(edit.isNew||!imageSelectMode)&&!edit.deleted).map(edit=><PdfImageObject key={edit.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} pageSize={pageSize} region={edit} imageEdit={edit} selected={selectedImage?.page === pageNumber && selectedImage?.key === edit.key} selectedImage={selectedImage} onSelect={onSelectImage} onOpen={onImageOpen} onChange={onImageEdit} onDelete={onImageDelete} onDuplicate={onImageDuplicate} pageWidth={displayWidth || pageWidth} pageHeight={displayHeight || pageHeight} candidate={imageSelectMode} />)}</div>
     {searchRects.length > 0 && <div className="pdf-search-highlight-layer" aria-hidden="true">{searchRects.map((rect) => <span key={rect.id} className={rect.active ? 'is-active' : ''} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} />)}</div>}
     <div ref={textLayer} className={`pdf-text-layer is-text-editing ${addTextMode ? 'is-adding-text' : ''}`} aria-label={`Selectable text on page ${pageNumber}`} onPointerDown={handleTextLayerPointerDown} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} onClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; const span = event.target.closest('.pdf-text-layer span'); lastClickedTextSpan.current = span || null; if (!span) { if (addTextMode) beginTextEdit(event, true); return } const group = collectEditableTextGroups(textLayer.current, pageSize).find((candidate) => candidate.spans.includes(span)); if (group?.key !== selectedText?.key) beginTextEdit(event, false, span) }} onDoubleClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; window.clearTimeout(pendingTextSelection.current); beginTextEdit(event, true, event.target.closest('.pdf-text-layer span') || lastClickedTextSpan.current) }} />
     {linkRegions.length > 0 && <div className="pdf-link-layer" aria-label={`Links on page ${pageNumber}`}>{linkRegions.map((link, index) => <a key={`${link.x}-${link.y}-${index}`} href={link.url || '#'} title={link.title} aria-label={link.title} style={{ left: `${link.x * 100}%`, top: `${link.y * 100}%`, width: `${link.width * 100}%`, height: `${link.height * 100}%` }} onClick={(event) => { event.stopPropagation(); if (link.destinationPage) onNavigateInternal(link.destinationPage); else if (link.url && event.metaKey) {/* Cmd+click - let browser open in new tab naturally */} else if (link.url) { event.preventDefault(); window.pdfKing?.openExternal?.(link.url).catch?.(() => {}) } } } />)}</div>}
     {annotationMode!=='form-design' && formFields.length > 0 && <PdfNativeFormLayer fields={formFields} pageNumber={pageNumber} pageSize={pageSize} pageHeight={pageHeight} values={formValues} onChange={onFormValueChange} />}
     {imageSelectMode && imageRegions.length > 0 && <div className="pdf-image-object-layer" aria-label={`Images on page ${pageNumber}`}>
-      {imageRegions.map((region) => <PdfImageObject key={region.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} region={region} imageEdit={imageEdits.find((edit) => edit.key === region.key)} selected={selectedImage?.page === pageNumber && selectedImage?.key === region.key} selectedImage={selectedImage} onSelect={onSelectImage} onChange={onImageEdit} />)}
+      {imageRegions.map((region) => <PdfImageObject key={region.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} pageSize={pageSize} region={region} imageEdit={imageEdits.find((edit) => edit.key === region.key)} selected={selectedImage?.page === pageNumber && selectedImage?.key === region.key} selectedImage={selectedImage} onSelect={onSelectImage} onOpen={onImageOpen} onChange={onImageEdit} onDelete={onImageDelete} onDuplicate={onImageDuplicate} pageWidth={displayWidth || pageWidth} pageHeight={displayHeight || pageHeight} candidate />)}
     </div>}
     {textEdits.filter((edit) => !edit.isNew && edit.backgroundColor && !edit.sourceCoverRects?.length).map((edit) => <span className="pdf-text-source-cover" key={`cover-${edit.key}`} aria-hidden="true" style={{ left: `${(edit.coverX ?? edit.x) * 100}%`, top: `${(edit.coverY ?? edit.y) * 100}%`, width: `${Math.min(1 - (edit.coverX ?? edit.x), edit.coverWidth || edit.width) * 100}%`, height: `${Math.min(1 - (edit.coverY ?? edit.y), edit.coverHeight || edit.height) * 100}%`, backgroundColor: edit.backgroundColor }} />)}
     {textEdits.filter(edit => !edit.isNew).flatMap(edit => (edit.sourceCoverRects || []).map((rect, index) => <span key={`${edit.key}-cover-${index}`} className="pdf-text-source-cover" aria-hidden="true" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%`, backgroundColor: rect.backgroundColor }} />))}
     {textEdits.map((edit) => {
       const preview = resolvedSelectedText?.key === edit.key ? resolvedSelectedText : edit
       const layout = getTextEditDisplayLayout(preview, pageWidth, pageHeight)
-      return <span className={`pdf-text-edit-preview ${edit.isNew ? 'is-new-text' : ''} ${edit.isNew && selectedTextBox?.page === pageNumber && selectedTextBox?.key === edit.key ? 'is-selected-text' : ''} `} key={edit.key} style={{ left: `${layout.left * 100}%`, top: `${layout.top * 100}%`, width: `${layout.width / (edit.horizontalScale || 1) * 100}%`, height: `${layout.height * 100}%`, fontSize: `${Math.max(.1, (edit.previewFontScale || edit.fontScale || edit.height * 0.8) * pageHeight)}px`, letterSpacing: edit.letterSpacingPt ? `${edit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : edit.letterSpacing ? `${edit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: layout.transform, lineHeight: `${Math.max(.1, (edit.lineHeightScale || edit.fontScale * 1.2) * pageHeight)}px`, fontFamily: edit.previewFontFamily || edit.fontFamily || 'sans-serif', fontWeight: edit.fontWeight || '400', fontStyle: edit.fontStyle || 'normal', color: edit.color || '#111', textAlign: edit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: edit.isNew || !edit.sourceLineCount ? 'pre-wrap' : 'pre', overflow: 'hidden' }} onClick={!edit.isNew ? (event) => { event.stopPropagation(); onTextObjectSelected(); if (selectedText?.key !== edit.key) setSelectedText(edit) } : undefined} onDoubleClick={!edit.isNew ? (event) => openEditedText(event, edit) : undefined} onPointerDown={(event) => { if (edit.isNew || !event.target.closest('.pdf-text-box-resize')) startBoxGesture(event, edit) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} title={edit.isNew ? 'Click to select; Delete or Backspace to remove; drag to move; drag an edge or corner to resize' : 'Click to select, drag to move, drag a handle to resize, and double-click to edit'}><span className="pdf-text-edit-content">{renderStyledText(edit.text, edit.styleRanges, pageHeight, pageSize?.height || 792, edit)}</span>{edit.isNew && <button type="button" className="pdf-text-box-delete" aria-label="Delete text box" title="Delete text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectTextBox(null); onTextDelete({ ...edit, page: pageNumber }) }}>×</button>}{edit.isNew && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, edit, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
+      return <span className={`pdf-text-edit-preview ${edit.isNew ? 'is-new-text' : ''} ${edit.isNew && selectedTextBox?.page === pageNumber && selectedTextBox?.key === edit.key ? 'is-selected-text' : ''} `} key={edit.key} style={{ left: `${layout.left * 100}%`, top: `${layout.top * 100}%`, width: `${layout.width / (edit.horizontalScale || 1) * 100}%`, height: `${layout.height * 100}%`, fontSize: `${Math.max(.1, (edit.previewFontScale || edit.fontScale || edit.height * 0.8) * pageHeight)}px`, letterSpacing: edit.letterSpacingPt ? `${edit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : edit.letterSpacing ? `${edit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: layout.transform, lineHeight: `${Math.max(.1, (edit.lineHeightScale || edit.fontScale * 1.2) * pageHeight)}px`, fontFamily: edit.previewFontFamily || edit.fontFamily || 'sans-serif', fontWeight: edit.fontWeight || '400', fontStyle: edit.fontStyle || 'normal', color: edit.color || '#111', opacity: edit.opacity ?? 1, textAlign: edit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: edit.isNew || !edit.sourceLineCount ? 'pre-wrap' : 'pre', overflow: 'hidden' }} onClick={!edit.isNew ? (event) => { event.stopPropagation(); onTextObjectSelected(); if (selectedText?.key !== edit.key) setSelectedText(edit) } : undefined} onDoubleClick={!edit.isNew ? (event) => openEditedText(event, edit) : undefined} onPointerDown={(event) => { if (edit.isNew || !event.target.closest('.pdf-text-box-resize')) startBoxGesture(event, edit) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} title={edit.isNew ? 'Click to select; Delete or Backspace to remove; drag to move; drag an edge or corner to resize' : 'Click to select, drag to move, drag a handle to resize, and double-click to edit'}><span className="pdf-text-edit-content">{renderStyledText(edit.text, edit.styleRanges, pageHeight, pageSize?.height || 792, edit)}</span>{edit.isNew && <button type="button" className="pdf-text-box-delete" aria-label="Delete text box" title="Delete text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectTextBox(null); onTextDelete({ ...edit, page: pageNumber }) }}>×</button>}{edit.isNew && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, edit, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
     })}
     {resolvedSelectedText && !resolvedSelectedText.isNew && <span className="pdf-selected-text-box" style={{ left: `${resolvedSelectedText.x * 100}%`, top: `${getTextEditDisplayLayout(resolvedSelectedText, pageWidth, pageHeight).visualTop * 100}%`, width: `${resolvedSelectedText.width * 100}%`, height: `${resolvedSelectedText.height * 100}%` }} aria-label="Selected text box" title="Double-click to edit; drag to reposition; use the handles to resize" onDoubleClick={(event) => openEditedText(event, resolvedSelectedText)} onPointerDown={(event) => startBoxGesture(event, resolvedSelectedText)} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture}>{['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, resolvedSelectedText, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>}
     {selectedToolbarEdit && !activeTextEdit && <div className="pdf-text-selection-toolbar" style={{ left: `${selectedToolbarLayout.visualLeft * 100}%`, top: `${Math.max(6, selectedToolbarLayout.visualTop * pageHeight - 44)}px` }} aria-label="Selected text box quick actions" onPointerDown={event => event.preventDefault()}><span>Text box</span><button type="button" onClick={event => openEditedText(event, selectedToolbarEdit)}>Edit</button><button type="button" className="danger" onClick={() => { onTextEdit({ ...selectedToolbarEdit, page: pageNumber, text: '' }); setSelectedText(null); onSelectTextBox(null) }}>Delete</button></div>}
@@ -3144,7 +3544,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
         <label className="pdf-text-format-color" title="Text color"><input aria-label="Text color" type="color" value={textStyle?.color || activeTextEdit.color || '#17233b'} onChange={event=>onTextStyleActivate?.({...textStyle,color:event.target.value})}/><span style={{backgroundColor:textStyle?.color || activeTextEdit.color || '#17233b'}} /></label>
         <button type="button" className="pdf-text-format-done" onClick={()=>commitTextEdit()}>Done</button>
       </div>
-      <RichTextInput key={activeTextEdit.key} ref={textInput} edit={activeTextEdit} preserveSourceLayout={preserveSourceLayout} displayWidth={pageWidth} displayHeight={pageHeight} pageHeight={pageSize?.height || 792} onEdit={setActiveTextEdit} onFit={fitTextInput} onSelection={handleTextSelection} className={`pdf-text-edit-input ${activeTextEdit.isNew ? 'is-new-text' : ''}`} style={{ left: `${activeInputLayout.left * 100}%`, top: `${activeInputLayout.top * 100}%`, width: `${activeInputLayout.width / (activeDisplayEdit.horizontalScale || 1) * 100}%`, height: `${activeInputLayout.height * 100}%`, fontSize: `${Math.max(.1, activeTextEdit.fontScale * pageHeight || activeTextEdit.displayFontSize)}px`, letterSpacing: activeTextEdit.letterSpacingPt ? `${activeTextEdit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : activeTextEdit.letterSpacing ? `${activeTextEdit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: activeInputLayout.transform, lineHeight: `${Math.max(.1, (activeTextEdit.lineHeightScale || activeTextEdit.fontScale * 1.2) * pageHeight)}px`, fontFamily: activeTextEdit.previewFontFamily || activeTextEdit.fontFamily || 'sans-serif', fontWeight: activeTextEdit.fontWeight || '400', fontStyle: activeTextEdit.fontStyle || 'normal', color: activeTextEdit.color || '#111', textAlign: activeTextEdit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: activeTextEdit.isNew || !activeTextEdit.sourceLineCount ? 'pre-wrap' : 'pre', overflowWrap: 'anywhere', overflow: 'hidden' }} aria-label={activeTextEdit.isNew ? 'Add text to PDF' : 'Replace PDF paragraph'} placeholder={activeTextEdit.isNew ? 'Type text…' : ''} onBlur={(event) => { if (event.relatedTarget?.closest?.('.pdf-text-format-ribbon, .text-style-control, .text-style-toggle, .pdf-text-box-resize, .pdf-text-highlight-controls')) return; commitTextEdit(event) }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && ['b', 'i'].includes(event.key.toLowerCase())) { event.preventDefault(); const key = event.key.toLowerCase() === 'b' ? 'bold' : 'italic'; onTextStyleActivate?.({ ...textStyle, [key]: !textStyle?.[key] }); return } if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commitTextEdit(event) } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setActiveTextEdit(null); setSelectedText(null) } }} />
+      <RichTextInput key={activeTextEdit.key} ref={textInput} edit={activeTextEdit} preserveSourceLayout={preserveSourceLayout} displayWidth={pageWidth} displayHeight={pageHeight} pageHeight={pageSize?.height || 792} onEdit={setActiveTextEdit} onFit={fitTextInput} onSelection={handleTextSelection} className={`pdf-text-edit-input ${activeTextEdit.isNew ? 'is-new-text' : ''}`} style={{ left: `${activeInputLayout.left * 100}%`, top: `${activeInputLayout.top * 100}%`, width: `${activeInputLayout.width / (activeDisplayEdit.horizontalScale || 1) * 100}%`, height: `${activeInputLayout.height * 100}%`, fontSize: `${Math.max(.1, activeTextEdit.fontScale * pageHeight || activeTextEdit.displayFontSize)}px`, letterSpacing: activeTextEdit.letterSpacingPt ? `${activeTextEdit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : activeTextEdit.letterSpacing ? `${activeTextEdit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: activeInputLayout.transform, lineHeight: `${Math.max(.1, (activeTextEdit.lineHeightScale || activeTextEdit.fontScale * 1.2) * pageHeight)}px`, fontFamily: activeTextEdit.previewFontFamily || activeTextEdit.fontFamily || 'sans-serif', fontWeight: activeTextEdit.fontWeight || '400', fontStyle: activeTextEdit.fontStyle || 'normal', color: activeTextEdit.color || '#111', opacity: activeTextEdit.opacity ?? 1, textAlign: activeTextEdit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: activeTextEdit.isNew || !activeTextEdit.sourceLineCount ? 'pre-wrap' : 'pre', overflowWrap: 'anywhere', overflow: 'hidden' }} aria-label={activeTextEdit.isNew ? 'Add text to PDF' : 'Replace PDF paragraph'} placeholder={activeTextEdit.isNew ? 'Type text…' : ''} onBlur={(event) => { if (event.relatedTarget?.closest?.('.pdf-text-format-ribbon, .text-style-control, .text-style-toggle, .pdf-text-box-resize, .pdf-text-highlight-controls')) return; commitTextEdit(event) }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && ['b', 'i'].includes(event.key.toLowerCase())) { event.preventDefault(); const key = event.key.toLowerCase() === 'b' ? 'bold' : 'italic'; onTextStyleActivate?.({ ...textStyle, [key]: !textStyle?.[key] }); return } if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commitTextEdit(event) } if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setActiveTextEdit(null); setSelectedText(null) } }} />
       <span className="pdf-text-live-handles" style={{ left: `${activeInputLayout.visualLeft * 100}%`, top: `${activeInputLayout.visualTop * 100}%`, width: `${activeInputLayout.visualWidth * 100}%`, height: `${activeInputLayout.visualHeight * 100}%` }}>{['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => startBoxGesture(event, { ...activeTextEdit, text: activeTextEdit.value }, edge)} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
     </>}
     {error && <p className="form-error" role="alert">{error} <button type="button" onClick={() => setRenderRetry(n => n + 1)}>Retry page</button></p>}

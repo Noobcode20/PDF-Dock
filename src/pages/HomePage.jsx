@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../icons'
 import { Presence } from '../components/Presence'
+import { printPdfDocument } from '../fileServices'
+import { recentFilesBackend } from '../recentFiles'
 
 const formatBytes = (size) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(2)} MB`
 const previewFrameForCanvas = (canvas, previousFrame = null) => {
@@ -71,7 +73,8 @@ function DocumentPreview({ record, page = 1, expanded = false, onOpenPreview, on
   useEffect(() => {
     let cancelled = false
     const canvas = canvasRef.current
-    if (!record || !canvas || !window.pdfKing?.readRecentFile) {
+    const backend = recentFilesBackend()
+    if (!record || !canvas || !backend?.readRecentFile) {
       setPreview({ status: 'idle', pageCount: 0, error: '' })
       return () => { cancelled = true }
     }
@@ -79,7 +82,7 @@ function DocumentPreview({ record, page = 1, expanded = false, onOpenPreview, on
     const controller = new AbortController()
     ;(async () => {
       try {
-        const data = await window.pdfKing.readRecentFile(record.id)
+        const data = await backend.readRecentFile(record.id)
         if (cancelled) return
         if (!data) throw new Error('The PDF could not be read.')
         const file = new File([data], record.name, { type: 'application/pdf' })
@@ -201,26 +204,36 @@ function DocumentPreview({ record, page = 1, expanded = false, onOpenPreview, on
   )
 }
 
-function ConfirmDialog({ isOpen, onClose, fileName, onDelete }) {
+function ConfirmDialog({ isOpen, onClose, fileName, bulkCount = 0, onDelete }) {
   const acceptButton = useRef(null)
   useEffect(() => { if (isOpen) acceptButton.current?.focus() }, [isOpen])
+  useEffect(() => {
+    if (!isOpen) return undefined
+    const handleDialogKeys = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() }
+      else if (event.key === 'Enter' && !event.repeat) { event.preventDefault(); event.stopPropagation(); onDelete() }
+    }
+    window.addEventListener('keydown', handleDialogKeys, true)
+    return () => window.removeEventListener('keydown', handleDialogKeys, true)
+  }, [isOpen, onClose, onDelete])
   return (
     <Presence present={isOpen} exitDuration={180}><div className="confirm-backdrop" onClick={onClose}>
-      <div className="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="remove-dialog-title" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => {
+      <div className={`confirm-panel${bulkCount > 0 ? ' confirm-panel-bulk' : ''}`} role="dialog" aria-modal="true" aria-labelledby="remove-dialog-title" onClick={(e) => e.stopPropagation()} onKeyDown={(event) => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() }
-        if (event.key === 'Enter' && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); event.stopPropagation(); if (!event.repeat) onDelete() }
         if (event.key === 'Tab') {
           const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled)')]
           if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus() }
           else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus() }
         }
       }}>
-        <div className="confirm-icon"><Icon name="trash" size={21} /></div>
-        <h2 className="confirm-title" id="remove-dialog-title">Remove from library?</h2>
-        <p className="confirm-message">Remove <strong>{fileName}</strong> from your library? It will be deleted from the app cache but stay on your computer.</p>
+        <div className="confirm-heading">
+          <div className="confirm-icon"><Icon name="trash" size={21} /></div>
+          <h2 className="confirm-title" id="remove-dialog-title">Remove from library?</h2>
+        </div>
+        <p className="confirm-message">{bulkCount > 0 ? <>Remove <strong>{bulkCount} selected {bulkCount === 1 ? 'file' : 'files'}</strong> from your library? Their cached data will be cleared, but the original files will remain on your computer.</> : <>Remove <strong>{fileName}</strong> from your library? It will be deleted from the app cache but stay on your computer.</>}</p>
         <div className="confirm-actions">
-          <button type="button" className="confirm-btn confirm-btn-cancel" onClick={onClose}><Icon name="x" size={14} /> Cancel</button>
-          <button ref={acceptButton} autoFocus type="button" className="confirm-btn confirm-btn-delete" onClick={onDelete}><Icon name="trash" size={14} /> Remove</button>
+          <button type="button" className="confirm-btn confirm-btn-cancel" onClick={onClose}><span className="confirm-btn-icon"><Icon name="x" size={14} /></span> Cancel <kbd>Esc</kbd></button>
+          <button ref={acceptButton} autoFocus type="button" className="confirm-btn confirm-btn-delete" onClick={onDelete}><span className="confirm-btn-icon"><Icon name="trash" size={14} /></span> {bulkCount > 0 ? 'Remove files' : 'Remove'} <kbd>↵</kbd></button>
         </div>
       </div>
     </div></Presence>
@@ -350,9 +363,10 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
   }
 
   const refresh = async () => {
-    if (!window.pdfKing?.getRecentFiles) { setFiles([]); return }
+    const backend = recentFilesBackend()
+    if (!backend?.getRecentFiles) { setFiles([]); return }
     try {
-      const records = await window.pdfKing.getRecentFiles()
+      const records = await backend.getRecentFiles()
       setFiles(records)
       const available = new Set(records.map((record) => record.id))
       setSelectedFiles((current) => new Set([...current].filter((id) => available.has(id))))
@@ -368,8 +382,10 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
 
   const open = async (record) => {
     try {
-      const data = await window.pdfKing?.readRecentFile(record.id)
-      if (!data) throw new Error('Recent file storage is only available in the desktop app.')
+      const backend = recentFilesBackend()
+      if (!backend?.readRecentFile) throw new Error('This PDF could not be opened because local file storage is unavailable.')
+      const data = await backend.readRecentFile(record.id)
+      if (!data) throw new Error('The selected recent PDF could not be read.')
       const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath=record.sourcePath
       onNavigate({ type: 'tool', toolId: 'pdf-editor', files: [file] })
     } catch (cause) { setError(cause.message || 'Could not open this recent PDF.') }
@@ -377,9 +393,10 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
 
   const readSelectedFiles = async () => {
     const selected = files.filter((record) => selectedFiles.has(record.id))
-    if (!selected.length || !window.pdfKing?.readRecentFile) throw new Error('Selected PDFs are unavailable in this workspace.')
+    const backend = recentFilesBackend()
+    if (!selected.length || !backend?.readRecentFile) throw new Error('Selected PDFs are unavailable in this workspace.')
     const result = await Promise.all(selected.map(async (record) => {
-      const data = await window.pdfKing.readRecentFile(record.id)
+      const data = await backend.readRecentFile(record.id)
       if (!data) throw new Error(`Could not read ${record.name}.`)
       const file = new File([data], record.name, { type: 'application/pdf' })
       file.sourcePath = record.sourcePath
@@ -398,17 +415,17 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
   const printSelected = async () => {
     try {
       const [file] = await readSelectedFiles()
-      if (!window.pdfKing?.printPdf) throw new Error('Printing is only available in the desktop app.')
-      await window.pdfKing.printPdf({ name: file.name, data: new Uint8Array(await file.arrayBuffer()) })
+      await printPdfDocument({ name: file.name, data: new Uint8Array(await file.arrayBuffer()) })
     } catch (cause) { setError(cause.message || 'Could not print the selected PDF.') }
   }
 
   const cancelEdit = () => { setConfirmOpen(false); setPendingFile(null) }
 
   const deleteFile = async () => {
-    if (!pendingFile?.id || !window.pdfKing?.removeRecentFile) return
+    const backend = recentFilesBackend()
+    if (!pendingFile?.id || !backend?.removeRecentFile) return
     try {
-      await window.pdfKing.removeRecentFile(pendingFile.id)
+      await backend.removeRecentFile(pendingFile.id)
       setFiles((current) => current.filter((f) => f.id !== pendingFile.id))
       setSelectedFiles((current) => { const next = new Set(current); next.delete(pendingFile.id); return next })
       setActiveFileId((current) => current === pendingFile.id ? null : current)
@@ -417,26 +434,35 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
     setPendingFile(null)
   }
 
-  const showDeleteConfirm = (record) => { setPendingFile({ file: null, name: record.name, id: record.id, isDelete: true }); setConfirmOpen(true) }
+  const showDeleteConfirm = (record) => {
+    const ids = selectedFiles.has(record.id) && selectedFiles.size > 1 ? [...selectedFiles] : [record.id]
+    setPendingFile({ ids, id: ids.length === 1 ? record.id : undefined, name: ids.length === 1 ? record.name : '', bulk: ids.length > 1 })
+    setConfirmOpen(true)
+  }
 
   useEffect(() => {
     const handleDeleteShortcut = (event) => {
       if (!(event.metaKey || event.ctrlKey) || !['Backspace', 'Delete'].includes(event.key)) return
       if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]') || confirmOpen) return
-      const record = files.find((file) => file.id === activeFileId)
+      const chosen = selectedFiles.size > 1 ? files.filter((file) => selectedFiles.has(file.id)) : files.filter((file) => file.id === activeFileId)
+      const record = chosen[0]
       if (!record) return
       event.preventDefault()
-      showDeleteConfirm(record)
+      if (chosen.length > 1) {
+        setPendingFile({ ids: chosen.map((file) => file.id), bulk: true, name: '' })
+        setConfirmOpen(true)
+      } else showDeleteConfirm(record)
     }
     window.addEventListener('keydown', handleDeleteShortcut)
     return () => window.removeEventListener('keydown', handleDeleteShortcut)
-  }, [files, activeFileId, confirmOpen])
+  }, [files, activeFileId, confirmOpen, selectedFiles])
 
   useEffect(() => {
     const handleHomeShortcut = (event) => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
       if (event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) return
       if (event.key === 'Escape') {
+        if (confirmOpen) return
         event.preventDefault()
         if (previewMode) {
           setPreviewMode(false)
@@ -466,7 +492,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
     }
     window.addEventListener('keydown', handleHomeShortcut)
     return () => window.removeEventListener('keydown', handleHomeShortcut)
-  }, [files, previewMode, query])
+  }, [files, previewMode, query, confirmOpen])
 
   useEffect(() => {
     const handleArrowKeys = (event) => {
@@ -497,19 +523,42 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
     return () => window.removeEventListener('keydown', handleArrowKeys)
   }, [files, visibleFiles, previewMode, activeFileId, previewPage, previewPageCount])
 
-  const removeSelected = async () => {
-    if (!window.pdfKing?.removeRecentFile || !selectedFiles.size) return
-    const ids = [...selectedFiles]
-    try {
-      await Promise.all(ids.map((id) => window.pdfKing.removeRecentFile(id)))
-      setFiles((current) => current.filter((record) => !selectedFiles.has(record.id)))
-      setSelectedFiles(new Set())
-      setActiveFileId(null)
-    } catch { setError('Could not remove all selected files. Refresh the library and try again.') }
+  const removeFiles = async (ids) => {
+    const targets = [...new Set(ids)]
+    const backend = recentFilesBackend()
+    if (!backend?.removeRecentFile || !targets.length) return
+    const removed = new Set()
+    for (const id of targets) {
+      try {
+        // The desktop bridge returns false when the recent-file ID was not present.
+        if (await backend.removeRecentFile(id)) removed.add(id)
+      } catch { /* continue so one failed ID does not block the rest */ }
+    }
+    if (removed.size) {
+      setFiles((current) => current.filter((record) => !removed.has(record.id)))
+      setSelectedFiles((current) => { const next = new Set(current); removed.forEach((id) => next.delete(id)); return next })
+      setActiveFileId((current) => removed.has(current) ? null : current)
+    }
+    if (removed.size !== targets.length) setError(`Removed ${removed.size} of ${targets.length} selected files. Refresh the library and try again.`)
+  }
+
+  const showRemoveSelectedConfirm = (ids = [...selectedFiles]) => {
+    if (!ids.length) return
+    const existingIds = files.filter((record) => ids.includes(record.id)).map((record) => record.id)
+    if (!existingIds.length) return
+    setPendingFile({ ids: existingIds, name: existingIds.length === 1 ? files.find((record) => record.id === existingIds[0])?.name : '', bulk: existingIds.length > 1 })
+    setConfirmOpen(true)
   }
 
   const confirmDelete = () => {
     setConfirmOpen(false)
+    if (pendingFile?.ids?.length) {
+      const ids = new Set(pendingFile.ids)
+      setPendingFile(null)
+      void removeFiles(ids)
+      return
+    }
+    setPendingFile(null)
     deleteFile()
   }
 
@@ -548,7 +597,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         <div className="recent-empty-state" style={{ padding: '32px 0' }}>
           <div className="empty-icon-wrap"><Icon name="pages" size={32} /></div>
           <h3>No recent documents yet</h3>
-          <p>PDF files you open or export in the desktop app will appear here.</p>
+          <p>PDFs you open or export are stored on this device and will appear here.</p>
         </div>
       ) : (
         <div className="recent-files-table" role="grid" aria-label="Recent documents">
@@ -577,7 +626,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         </div>
       )}
       </div>
-      <DocumentPreview record={files.find((file) => file.id === activeFileId) || null} page={previewPage} expanded={previewMode} onOpenPreview={() => setPreviewMode(true)} onClosePreview={() => { setPreviewMode(false); setPreviewPage(1) }} onNavigatePage={(direction) => setPreviewPage((current) => Math.max(1, current + direction))} onPageCountChange={handlePreviewPageCount} selectedCount={selectedFiles.size} onRemoveSelected={removeSelected} onOpenPdf={onOpenPdf} onOpenSelected={() => { const record = files.find((file) => file.id === [...selectedFiles][0]); if (record) void open(record) }} onRunFileAction={runSelectedTool} onPrintSelected={printSelected} onFilesDropped={handleDroppedFiles} />
+      <DocumentPreview record={files.find((file) => file.id === activeFileId) || null} page={previewPage} expanded={previewMode} onOpenPreview={() => setPreviewMode(true)} onClosePreview={() => { setPreviewMode(false); setPreviewPage(1) }} onNavigatePage={(direction) => setPreviewPage((current) => Math.max(1, current + direction))} onPageCountChange={handlePreviewPageCount} selectedCount={selectedFiles.size} onRemoveSelected={() => showRemoveSelectedConfirm([...selectedFiles])} onOpenPdf={onOpenPdf} onOpenSelected={() => { const record = files.find((file) => file.id === [...selectedFiles][0]); if (record) void open(record) }} onRunFileAction={runSelectedTool} onPrintSelected={printSelected} onFilesDropped={handleDroppedFiles} />
       </div>
       <Presence present={selectionNotice} exitDuration={180}>
         <div className="file-open-hint" role="status">Selected — double-click to open this PDF</div>
@@ -586,6 +635,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         isOpen={confirmOpen}
         onClose={cancelEdit}
         fileName={pendingFile?.name}
+        bulkCount={pendingFile?.bulk ? pendingFile.ids.length : 0}
         onDelete={confirmDelete}
       />
     </div>

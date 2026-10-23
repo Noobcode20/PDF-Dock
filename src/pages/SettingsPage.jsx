@@ -3,6 +3,7 @@ import { Icon } from '../icons'
 import { THEMES, isLightTheme } from '../themes'
 import { DEFAULT_SHORTCUTS, loadShortcuts, saveShortcuts } from '../keyboardShortcuts'
 import { listLocalFonts, readFontFamilyName, removeLocalFont, saveLocalFont } from '../editor/localFonts'
+import { recentFilesBackend } from '../recentFiles'
 
 function InteractiveShortcuts({ showAll, setShowAll }) {
   const [shortcuts, setShortcuts] = useState(loadShortcuts())
@@ -160,11 +161,12 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
   const [draftName, setDraftName] = useState(userName)
   const avatarPicker = useRef(null)
   const nameInput = useRef(null)
+  const hasNativeOutputFolder = Boolean(window.pdfKing?.chooseOutputFolder)
 
   useEffect(() => {
     const refreshSettings = () => {
       window.pdfKing?.getDefaultOutputFolder?.().then(setSavePath).catch(() => {})
-      window.pdfKing?.getRecentFiles?.().then((files) => setCacheSize(files.reduce((sum, file) => sum + (file.size || 0), 0))).catch(() => {})
+      Promise.resolve(recentFilesBackend().getRecentFiles?.()).then((files) => setCacheSize((files || []).reduce((sum, file) => sum + (file.size || 0), 0))).catch(() => {})
     }
     refreshSettings()
     window.addEventListener('focus', refreshSettings)
@@ -206,8 +208,9 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
   const handleClearCache = async () => {
     setCacheCleared(false)
     try {
-      if (!window.pdfKing?.clearRecentFiles) throw new Error('Clearing local PDF copies is only available in the desktop app.')
-      await window.pdfKing.clearRecentFiles()
+      const backend = recentFilesBackend()
+      if (!backend?.clearRecentFiles) throw new Error('Clearing local PDF copies is not available in this build.')
+      await backend.clearRecentFiles()
       setCacheSize(0)
       setSettingsError('')
       setCacheCleared(true)
@@ -288,7 +291,7 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
   return (
     <div className="page-content settings-page settings-redesign">
       <header className="settings-page-heading">
-        <div><h1>Settings</h1><p>Personalize your PDF King workspace</p></div>
+        <div><h1>Settings</h1><p>Personalize your PDF Dock workspace</p></div>
       </header>
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {[
@@ -340,7 +343,7 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
             <div className="setting-row">
               <div>
                 <strong>On-device processing</strong>
-                <p>PDF operations run locally in this app. Files are saved through your desktop file dialog.</p>
+                <p>{hasNativeOutputFolder ? 'PDF operations run locally in this app. Files are saved through your desktop file dialog.' : 'PDF operations run locally in this tab. Exports are downloaded by your browser.'}</p>
               </div>
             </div>
             <div className="setting-row">
@@ -412,10 +415,10 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
           <div className="settings-card-body">
             <div className="setting-row">
               <div>
-                <strong>Default Export Folder</strong>
-                <p>Processed PDFs will be exported to this directory.</p>
+                <strong>{hasNativeOutputFolder ? 'Default Export Folder' : 'Export Destination'}</strong>
+                <p>{hasNativeOutputFolder ? 'Processed PDFs will be exported to this directory.' : 'Processed PDFs are downloaded by your browser to its default download location.'}</p>
               </div>
-              <div className="folder-input-group">
+              {hasNativeOutputFolder ? <div className="folder-input-group">
                 <input
                   type="text"
                   className="studio-input folder-input"
@@ -429,7 +432,7 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
                 >
                   Change
                 </button>
-              </div>
+              </div> : <span className="settings-native-note">Browser download</span>}
             </div>
 
             <div className="setting-row">

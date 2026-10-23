@@ -157,12 +157,12 @@ export const allTools = [
     name: 'Page numbers',
     category: 'edit',
     categoryLabel: 'Edit & annotate',
-    description: 'Add numbers, headers, and footers to every page',
+    description: 'Add formatted page numbers to all or selected pages',
     icon: 'pages',
     tone: 'lilac',
     popular: false,
     actionName: 'Apply Numbering',
-    tip: 'Position numbers at top/bottom corners or centered with custom format.',
+    tip: 'Position numbers at top/bottom corners or centered; use {n} and {total} in the format.',
     kind: 'numbers'
   },
   {
@@ -170,7 +170,7 @@ export const allTools = [
     name: 'Add watermark',
     category: 'edit',
     categoryLabel: 'Edit & annotate',
-    description: 'Stamp custom text onto selected pages',
+    description: 'Stamp custom text onto all or selected pages',
     icon: 'pen',
     tone: 'rose',
     popular: false,
@@ -296,7 +296,7 @@ export const allTools = [
     tone: 'lilac',
     popular: false,
     actionName: 'Convert to PowerPoint',
-    tip: 'PDF text is placed in editable PowerPoint text boxes. Illustrations and complex vector artwork remain in the page background.',
+    tip: 'Rebuilds editable text, detected bullets, embedded images, simple lines, and rectangles. Scanned pages use OCR. Whole-page screenshots are not used; complex vector artwork may be omitted.',
     kind: 'convert'
   },
   {

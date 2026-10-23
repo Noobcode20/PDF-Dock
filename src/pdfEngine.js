@@ -5,6 +5,7 @@ import { detectTextFormCandidates } from './editor/formDetection'
 import { addOcrWords } from './editor/ocrTextLayer'
 import { commitOperations, fontAssets } from './editor/commit'
 import { displayFrame, pdfRect, reframeRegion } from './editor/coordinates'
+import { captureImagePlacement } from './editor/imageCapture'
 import { PDFDocument, PDFHexString, PDFName, StandardFonts, rgb, degrees, pushGraphicsState, popGraphicsState, concatTransformationMatrix } from 'pdf-lib'
 import 'regenerator-runtime/runtime'
 import './mapCompat'
@@ -325,27 +326,6 @@ async function pageToImage(pdfJsDoc, pageNumber, options = {}) {
 
 function canvasPngDataUrl(canvas) {
   return canvas.toDataURL('image/png')
-}
-
-function samplePageBackground(pixels, canvasWidth, canvasHeight, x, y, width, height, scale) {
-  const points = [
-    [x - 2, y - 2], [x + width / 2, y - 2], [x + width + 2, y - 2],
-    [x - 2, y + height + 2], [x + width / 2, y + height + 2], [x + width + 2, y + height + 2],
-    [x - 2, y + height / 2], [x + width + 2, y + height / 2],
-  ]
-  const colors = []
-  for (const [pointX, pointY] of points) {
-    const px = Math.max(0, Math.min(canvasWidth - 1, Math.round(pointX * scale)))
-    const py = Math.max(0, Math.min(canvasHeight - 1, Math.round(pointY * scale)))
-    const offset = (py * canvasWidth + px) * 4
-    colors.push([pixels.data[offset], pixels.data[offset + 1], pixels.data[offset + 2]])
-  }
-  const channels = [0, 1, 2].map((channel) => {
-    const values = colors.map((color) => color[channel]).sort((a, b) => a - b)
-    return { median: values[Math.floor(values.length / 2)], spread: values.at(-1) - values[0] }
-  })
-  if (channels.some((channel) => channel.spread > 28)) return null
-  return `#${channels.map(({ median }) => median.toString(16).padStart(2, '0')).join('')}`
 }
 
 function pptxFontFace(font, style) {
@@ -828,6 +808,8 @@ async function applyTextOverlay(file, options, mode) {
   const font = await textFont(pdf, `${text}\n${options.format || ''}`)
   const selected = options.pages ? new Set(parsePageList(options.pages, pdf.getPageCount())) : null
   const start = Number(options.startNumber ?? options.startAt ?? 1)
+  // Count only pages that receive a number, so selected subsets start at the configured value.
+  let sequence = start
   if (mode === 'watermark' && !text.trim()) fail('Enter watermark text before applying it.')
   const opacity = Math.max(0.05, Math.min(1, Number(options.opacity ?? 0.25)))
   const angle = Number(options.angle ?? 45)
@@ -842,7 +824,8 @@ async function applyTextOverlay(file, options, mode) {
     if (mode === 'watermark') {
       page.drawText(text, { x: width * 0.13, y: height * 0.48, size: fontSize, font, color, opacity, rotate: degrees(angle), maxWidth: width * 0.75 })
     } else {
-      const label = String(options.format || '{n}').replaceAll('{n}', String(start + index)).replaceAll('{total}', String(pdf.getPageCount()))
+      const label = String(options.format || '{n}').replaceAll('{n}', String(sequence)).replaceAll('{total}', String(pdf.getPageCount()))
+      sequence += 1
       const tw = font.widthOfTextAtSize(label, fontSize)
       const [vertical, horizontal] = position.split('-')
       const x = horizontal === 'left' ? 36 : horizontal === 'right' ? width - tw - 36 : (width - tw) / 2
@@ -903,44 +886,12 @@ async function editPdfText(file, edits = []) {
 
 async function editPdfImages(file, edits = []) {
   if (!Array.isArray(edits) || !edits.length) fail('Select or change at least one image before saving.')
-  const { pdf } = await loadPdf(file)
-  for (const edit of edits) {
-    const pageNumber = Number(edit.page)
-    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pdf.getPageCount()) fail('An image edit refers to a page that is no longer in this PDF.')
-    const page = pdf.getPage(pageNumber - 1)
-    const original = edit.original || edit
-    const originalBox = await normalizedRectToPage(file, pageNumber, page, original)
-    if (originalBox.width <= 0 || originalBox.height <= 0) continue
-    page.drawRectangle({ ...originalBox, color: rgb(1, 1, 1) })
-
-    const source = edit.replacementData || edit.sourceData
-    if (!source) continue
-    let blob = source instanceof Blob ? source : new Blob([source], { type: edit.replacementType || 'image/png' })
-    const crop = edit.crop || {}
-    const top = Math.max(0, Math.min(0.95, (Number(crop.top) || 0) / 100))
-    const right = Math.max(0, Math.min(0.95, (Number(crop.right) || 0) / 100))
-    const bottom = Math.max(0, Math.min(0.95, (Number(crop.bottom) || 0) / 100))
-    const left = Math.max(0, Math.min(0.95, (Number(crop.left) || 0) / 100))
-    let outputMime = edit.replacementType || blob.type
-    if (top || right || bottom || left) {
-      const bitmap = await createImageBitmap(blob)
-      const sx = Math.round(bitmap.width * left)
-      const sy = Math.round(bitmap.height * top)
-      const sw = Math.max(1, Math.round(bitmap.width * (1 - left - right)))
-      const sh = Math.max(1, Math.round(bitmap.height * (1 - top - bottom)))
-      const canvas = document.createElement('canvas')
-      canvas.width = sw; canvas.height = sh
-      canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh)
-      bitmap.close?.()
-      blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-      outputMime = 'image/png'
-    }
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    const embedded = outputMime === 'image/jpeg' ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes)
-    const target = await normalizedRectToPage(file, pageNumber, page, edit)
-    page.drawImage(embedded, target)
-  }
-  return output(`${baseName(file)}_images-edited.pdf`, await savePdf(pdf))
+  // The editor and this tool share one placement path so the saved PDF always
+  // matches the preview: same crop, rotation, flip, skew and cover behaviour.
+  const { prepareImageOperations } = await import('./editor/prepareImages')
+  const operations = await prepareImageOperations(edits.map((edit) => ({ ...edit, type: 'image' })))
+  const data = await commitOperations(file, operations)
+  return output(`${baseName(file)}_images-edited.pdf`, data)
 }
 
 async function fillForm(file, options) {
@@ -1274,26 +1225,24 @@ async function processKnown(toolId, files, options, onProgress) {
     const slideHeight = Math.max(1, firstViewport.height / 72)
     pptx.defineLayout({ name: 'PDF_PAGE', width: slideWidth, height: slideHeight })
     pptx.layout = 'PDF_PAGE'
-    pptx.author = 'PDF King'
+    pptx.author = 'PDF Dock'
     pptx.subject = 'Slides converted from PDF pages'
-    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+    let ocrWorker = null
+    try { for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
       const page = await doc.getPage(pageNumber)
       const viewport = page.getViewport({ scale: 1 })
       const textContent = await page.getTextContent()
-      const textColors = extractTextColorStyles(await page.getOperatorList(), pdfjs.OPS, textContent.items)
-      const { canvas } = await renderPage(doc, pageNumber, 2)
-      const pagePixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height)
+      const operatorList = await page.getOperatorList()
+      const textColors = extractTextColorStyles(operatorList, pdfjs.OPS, textContent.items)
       const editableTexts = []
-      const masks = []
       textContent.items.forEach((item, index) => {
-        if (!('str' in item) || !item.str.trim() || item.dir === 'ttb') return
+        if (!('str' in item) || !item.str.trim()) return
         const transform = item.transform || []
         const fontSize = Math.hypot(transform[2] || 0, transform[3] || 0)
         const widthPt = Number(item.width) || 0
         if (!Number.isFinite(fontSize) || fontSize < 1 || !Number.isFinite(widthPt) || widthPt <= 0) return
         const matrix = pdfjs.Util.transform(viewport.transform, transform)
         const angle = Math.atan2(matrix[1], matrix[0]) * 180 / Math.PI
-        if (Math.abs(angle) > 1) return
         const baseline = viewport.convertToViewportPoint(transform[4], transform[5])
         const style = textContent.styles?.[item.fontName] || {}
         const ascent = Math.max(0.55, Math.min(1.15, Number(style.ascent) || 0.82))
@@ -1307,21 +1256,38 @@ async function processKnown(toolId, files, options, onProgress) {
           w: widthPt / 72,
           h: fontSize * (ascent + descent) / 72,
           fontSize,
+          angle,
           color: textColors[index]?.color && /^#[\da-f]{6}$/i.test(textColors[index].color) ? textColors[index].color.slice(1) : '111111',
           ...pdfTextStyle(item, style, font),
         }
-        if (box.x < 0 || box.y < 0 || box.x + box.w > viewport.width / 72 || box.y + box.h > viewport.height / 72) return
-        const eraseX = Math.max(0, box.x * 72 - 1.5)
-        const eraseY = Math.max(0, box.y * 72 - 1)
-        const eraseW = Math.min(viewport.width - eraseX, box.w * 72 + 3)
-        const eraseH = Math.min(viewport.height - eraseY, box.h * 72 + 2)
-        const fill = samplePageBackground(pagePixels, canvas.width, canvas.height, eraseX, eraseY, eraseW, eraseH, 2)
-        if (fill) masks.push({ x: eraseX * 2, y: eraseY * 2, w: eraseW * 2, h: eraseH * 2, fill })
+        const bullet = box.text.match(/^(\s*)([•◦▪‣⁃])\s+/u)
+        if (bullet) { box.text = box.text.slice(bullet[0].length); box.bullet = true }
+        if (box.x < -0.02 || box.y < -0.02 || box.x + box.w > viewport.width / 72 + 0.02 || box.y + box.h > viewport.height / 72 + 0.02) return
         editableTexts.push(box)
       })
-      const context = canvas.getContext('2d')
-      for (const mask of masks) { context.fillStyle = mask.fill; context.fillRect(mask.x, mask.y, mask.w, mask.h) }
-      const data = canvasPngDataUrl(canvas)
+      if (!editableTexts.length) {
+        if (!ocrWorker) {
+          progress(onProgress, (pageNumber - 1) / doc.numPages, 'Loading OCR to recognize scanned pages…')
+          const { createWorker } = await import('tesseract.js')
+          ocrWorker = await createWorker(options.language || 'eng', 1, {
+            workerPath: new URL('ocr/worker.min.js', document.baseURI).href,
+            corePath: new URL('ocr/', document.baseURI).href,
+            langPath: new URL('ocr/', document.baseURI).href,
+            workerBlobURL: false,
+          })
+        }
+        const dpi = Math.max(120, Math.min(300, Number(options.ocrDpi) || 200))
+        const { canvas } = await renderPage(doc, pageNumber, dpi / 72)
+        const { data } = await ocrWorker.recognize(canvas, {}, { blocks: true })
+        for (const word of data.words || []) {
+          const value = String(word.text || '').trim()
+          const bounds = word.bbox
+          if (!value || !bounds || bounds.x1 <= bounds.x0 || bounds.y1 <= bounds.y0) continue
+          const fontSize = Math.max(5, (bounds.y1 - bounds.y0) * 72 / dpi)
+          editableTexts.push({ text: value, x: bounds.x0 / dpi, y: bounds.y0 / dpi, w: Math.max(0.02, (bounds.x1 - bounds.x0) / dpi), h: Math.max(0.05, (bounds.y1 - bounds.y0) / dpi), fontSize, color: '111111', fontFace: 'Arial', bold: false, italic: false, angle: 0 })
+        }
+        canvas.width = canvas.height = 0
+      }
       const slide = pptx.addSlide()
       slide.background = { color: 'FFFFFF' }
       const imageWidth = viewport.width / 72
@@ -1331,7 +1297,106 @@ async function processKnown(toolId, files, options, onProgress) {
       const height = imageHeight * scale
       const offsetX = (slideWidth - width) / 2
       const offsetY = (slideHeight - height) / 2
-      slide.addImage({ data, x: offsetX, y: offsetY, w: width, h: height })
+      // Ask PDF.js to decode image XObjects, then add the decoded source
+      // objects individually. The rendered page canvas is never exported.
+      const imageOps = new Set([pdfjs.OPS.paintImageXObject, pdfjs.OPS.paintInlineImageXObject, pdfjs.OPS.paintImageMaskXObject])
+      const pendingImages = []
+      const nativeShapes = []
+      let ctm = [1, 0, 0, 1, 0, 0]
+      const ctmStack = []
+      let fillColor = '000000'
+      let strokeColor = '000000'
+      let lineWidth = 1
+      let currentPath = null
+      const multiply = (a, b) => [
+        a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+        a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3],
+        a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
+      ]
+      const point = (m, x, y) => ({ x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] })
+      for (let opIndex = 0; opIndex < operatorList.fnArray.length; opIndex += 1) {
+        const op = operatorList.fnArray[opIndex]
+        const args = operatorList.argsArray[opIndex] || []
+        if (op === pdfjs.OPS.save) ctmStack.push({ ctm, fillColor, strokeColor, lineWidth })
+        else if (op === pdfjs.OPS.restore) {
+          const state = ctmStack.pop()
+          if (state) ({ ctm, fillColor, strokeColor, lineWidth } = state)
+        }
+        else if (op === pdfjs.OPS.transform && args.length >= 6) ctm = multiply(ctm, args.slice(0, 6))
+        else if (op === pdfjs.OPS.setFillRGBColor && typeof args[0] === 'string') fillColor = args[0].replace('#', '')
+        else if (op === pdfjs.OPS.setStrokeRGBColor && typeof args[0] === 'string') strokeColor = args[0].replace('#', '')
+        else if (op === pdfjs.OPS.setLineWidth && Number.isFinite(args[0])) lineWidth = args[0]
+        else if (op === pdfjs.OPS.constructPath) {
+          const pathOps = args[0] || []
+          const coords = args[1] || []
+          const points = []
+          let cursor = 0
+          let start = null
+          for (const command of pathOps) {
+            if (command === 0 || command === 1) {
+              const raw = point(ctm, coords[cursor++], coords[cursor++])
+              const transformed = point(viewport.transform, raw.x, raw.y)
+              points.push({ x: transformed.x / 72, y: transformed.y / 72, move: command === 0 })
+              if (command === 0) start = points.at(-1)
+            } else if (command === 2) cursor += 6
+            else if (command === 3) cursor += 4
+            else if (command === 4 && start) points.push({ ...start, close: true })
+          }
+          currentPath = points
+        }
+        else if ([pdfjs.OPS.fill, pdfjs.OPS.eoFill, pdfjs.OPS.fillStroke, pdfjs.OPS.eoFillStroke, pdfjs.OPS.closeFillStroke, pdfjs.OPS.closeEOFillStroke, pdfjs.OPS.stroke, pdfjs.OPS.closeStroke].includes(op)) {
+          if (currentPath?.length >= 2) {
+            const drawable = currentPath.filter((point) => !point.close)
+            const close = currentPath.some((point) => point.close)
+            const xs = drawable.map((point) => point.x), ys = drawable.map((point) => point.y)
+            const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys)
+            const isRect = close && drawable.length === 4 && (right - left) > 0.002 && (bottom - top) > 0.002 && drawable.every((point, index) => Math.abs(point.x - (index % 2 ? right : left)) < 0.01 || Math.abs(point.x - (index % 2 ? left : right)) < 0.01)
+            const isLine = drawable.length === 2 && !close
+            if (isRect) nativeShapes.push({ type: 'rect', x: offsetX + left * scale, y: offsetY + top * scale, w: (right - left) * scale, h: (bottom - top) * scale, fill: fillColor, line: strokeColor, lineWidth, filled: [pdfjs.OPS.fill, pdfjs.OPS.eoFill, pdfjs.OPS.fillStroke, pdfjs.OPS.eoFillStroke, pdfjs.OPS.closeFillStroke, pdfjs.OPS.closeEOFillStroke].includes(op), stroked: [pdfjs.OPS.fillStroke, pdfjs.OPS.eoFillStroke, pdfjs.OPS.closeFillStroke, pdfjs.OPS.closeEOFillStroke, pdfjs.OPS.stroke, pdfjs.OPS.closeStroke].includes(op) })
+            else if (isLine) nativeShapes.push({ type: 'line', x: offsetX + drawable[0].x * scale, y: offsetY + drawable[0].y * scale, w: (drawable[1].x - drawable[0].x) * scale, h: (drawable[1].y - drawable[0].y) * scale, line: strokeColor, lineWidth })
+          }
+          currentPath = null
+        }
+        else if (imageOps.has(op) && typeof args[0] === 'string') {
+          const matrix = multiply(viewport.transform, ctm)
+          const corners = [point(matrix, 0, 0), point(matrix, 1, 0), point(matrix, 0, 1), point(matrix, 1, 1)]
+          const left = Math.max(0, Math.min(...corners.map(({ x }) => x)))
+          const top = Math.max(0, Math.min(...corners.map(({ y }) => y)))
+          const right = Math.min(viewport.width, Math.max(...corners.map(({ x }) => x)))
+          const bottom = Math.min(viewport.height, Math.max(...corners.map(({ y }) => y)))
+          if (right - left > 1 && bottom - top > 1) pendingImages.push({ id: args[0], x: left / 72, y: top / 72, w: (right - left) / 72, h: (bottom - top) / 72 })
+        }
+      }
+      if (pendingImages.length) {
+        const maxScale = Math.min(1, Math.sqrt(4_000_000 / Math.max(1, viewport.width * viewport.height)))
+        const decoded = await renderPage(doc, pageNumber, maxScale)
+        decoded.canvas.width = decoded.canvas.height = 1
+        for (const image of pendingImages) {
+          try {
+            const source = page.objs.has(image.id) ? page.objs.get(image.id) : await new Promise((resolve) => page.objs.get(image.id, resolve))
+            const imageWidth = Number(source?.width) || Number(source?.bitmap?.width)
+            const imageHeight = Number(source?.height) || Number(source?.bitmap?.height)
+            if (!imageWidth || !imageHeight) continue
+            const imageCanvas = document.createElement('canvas')
+            imageCanvas.width = imageWidth
+            imageCanvas.height = imageHeight
+            const imageContext = imageCanvas.getContext('2d')
+            if (source.bitmap) imageContext.drawImage(source.bitmap, 0, 0)
+            else if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) imageContext.drawImage(source, 0, 0)
+            else if (source.data?.length === imageWidth * imageHeight * 4) imageContext.putImageData(new ImageData(new Uint8ClampedArray(source.data), imageWidth, imageHeight), 0, 0)
+            else if (source.data?.length === imageWidth * imageHeight * 3) {
+              const rgba = new Uint8ClampedArray(imageWidth * imageHeight * 4)
+              for (let p = 0, q = 0; p < source.data.length; p += 3, q += 4) { rgba[q] = source.data[p]; rgba[q + 1] = source.data[p + 1]; rgba[q + 2] = source.data[p + 2]; rgba[q + 3] = 255 }
+              imageContext.putImageData(new ImageData(rgba, imageWidth, imageHeight), 0, 0)
+            } else continue
+            slide.addImage({ data: canvasPngDataUrl(imageCanvas), x: offsetX + image.x * scale, y: offsetY + image.y * scale, w: image.w * scale, h: image.h * scale })
+          } catch (error) { console.warn(`PDF Dock could not extract PDF image ${image.id}:`, error) }
+        }
+      }
+      for (const shape of nativeShapes) {
+        if (shape.type === 'line') slide.addShape(pptx.ShapeType.line, { x: shape.x, y: shape.y, w: shape.w, h: shape.h, line: { color: shape.line, width: Math.max(0.25, shape.lineWidth) } })
+        else slide.addShape(pptx.ShapeType.rect, { x: shape.x, y: shape.y, w: shape.w, h: shape.h, line: shape.stroked ? { color: shape.line, width: Math.max(0.25, shape.lineWidth) } : { color: shape.fill, transparency: 100 }, fill: shape.filled ? { color: shape.fill } : { color: 'FFFFFF', transparency: 100 } })
+      }
       for (const text of editableTexts) {
         slide.addText(text.text, {
           x: offsetX + text.x * scale, y: offsetY + text.y * scale,
@@ -1339,14 +1404,16 @@ async function processKnown(toolId, files, options, onProgress) {
           fontFace: text.fontFace, fontSize: text.fontSize * scale,
           color: text.color, bold: text.bold, italic: text.italic,
           margin: 0, breakLine: false, valign: 'mid', fit: 'shrink',
+          rotate: text.angle,
+          ...(text.bullet ? { bullet: { indent: text.fontSize * scale }, hanging: Math.max(2, text.fontSize * scale * 0.2) } : {}),
           transparency: 0,
         })
       }
       progress(onProgress, pageNumber / doc.numPages, `Converted page ${pageNumber} of ${doc.numPages}; ${editableTexts.length} editable text items`)
-    }
+    } } finally { if (ocrWorker) await ocrWorker.terminate() }
     const bytes = await pptx.write({ outputType: 'uint8array', compression: true })
     const result = output(`${baseName(file)}.pptx`, bytes, PPTX_MIME)
-    result.message = 'PDF text is editable in PowerPoint. Page artwork and complex vector objects remain as a page image.'
+    result.message = 'Editable text, detected bullets, embedded images, and simple lines and rectangles are rebuilt as slide objects. Scanned pages use OCR to create editable text. Whole-page screenshots are not used. Complex vector paths, patterns, and gradients are not fully reconstructed.'
     return [result]
   }
 
@@ -1804,7 +1871,9 @@ export async function inspectPdfPageFormFields(file, pageNumber, rotation = 0) {
   return fields
 }
 
-/** Return PDF image paint bounds in normalized top-left page coordinates. */
+/** Return PDF image paint bounds in normalized top-left page coordinates.
+ * Each region also carries the exact painted quad and the source object id so
+ * the editor can re-embed the original pixels instead of a page screenshot. */
 export async function inspectPdfPageImages(file, pageNumber, rotation = 0) {
   const doc = await getPdfJsDocument(file)
   const number = Number(pageNumber)
@@ -1831,18 +1900,131 @@ export async function inspectPdfPageImages(file, pageNumber, rotation = 0) {
     else if (operation === OPS.transform && args.length >= 6) transform = multiply(transform, args.slice(0, 6))
     else if (imageOps.has(operation)) {
       const combined = multiply(viewport.transform, transform)
+      const capture = captureImagePlacement(combined, Number(args[1]) || 0, Number(args[2]) || 0)
       const corners = [point(combined, 0, 0), point(combined, 1, 0), point(combined, 0, 1), point(combined, 1, 1)]
       const left = Math.max(0, Math.min(...corners.map((corner) => corner.x)))
       const top = Math.max(0, Math.min(...corners.map((corner) => corner.y)))
       const right = Math.min(viewport.width, Math.max(...corners.map((corner) => corner.x)))
       const bottom = Math.min(viewport.height, Math.max(...corners.map((corner) => corner.y)))
-      if (right - left > 2 && bottom - top > 2) images.push({ key: `image-${images.length}`, x: left / viewport.width, y: top / viewport.height, width: (right - left) / viewport.width, height: (bottom - top) / viewport.height,
-        imageTransform: combined.map((n,i)=>n/(i%2?viewport.height:viewport.width)),
-        sourceWidth: Number(args[1]) || null, sourceHeight: Number(args[2]) || null,
-        complexTransform: Math.abs(combined[0]*combined[2]+combined[1]*combined[3]) > .01 })
+      if (right - left > 2 && bottom - top > 2) images.push({
+        key: `image-${images.length}`,
+        x: left / viewport.width,
+        y: top / viewport.height,
+        width: (right - left) / viewport.width,
+        height: (bottom - top) / viewport.height,
+        quad: corners.map((corner) => ({ x: corner.x / viewport.width, y: corner.y / viewport.height })),
+        sourceId: typeof args[0] === 'string' ? args[0] : null,
+        combined,
+        tiled: operation === OPS.paintImageXObjectRepeat || operation === OPS.paintImageMaskXObjectRepeat,
+        imageTransform: combined.map((n, i) => n / (i % 2 ? viewport.height : viewport.width)),
+        /* The capture bakes the placement of the image into the pixels, so
+         * the source size is the size of the capture: a rotated image is
+         * captured rotated. */
+        sourceWidth: capture.canvasWidth || null,
+        sourceHeight: capture.canvasHeight || null,
+        complexTransform: Math.abs(combined[0] * combined[2] + combined[1] * combined[3]) > .01,
+      })
     }
   }
   return images
+}
+
+/** The store that holds a PDF.js image object.
+ *
+ * PDF.js keeps a page-local image in the page object store, but an image that
+ * is used on more than one page is cached globally and delivered to the shared
+ * store under an id that starts with "g_". Asking the page store for a shared
+ * id leaves the request pending forever, because PDF.js only resolves an
+ * object when the worker delivers it. */
+export function pdfImageObjectStore(page, sourceId) {
+  if (!page || !sourceId) return null
+  return typeof sourceId === 'string' && sourceId.startsWith('g_')
+    ? page.commonObjs
+    : page.objs
+}
+
+/** Read a PDF.js image object, giving up after `timeoutMs`.
+ *
+ * The lookup is bounded on purpose: an object that PDF.js never delivers must
+ * report a missing image instead of waiting for the next edit. */
+export function readPdfImageObject(store, sourceId, timeoutMs = 1500) {
+  if (!store || !sourceId) return Promise.resolve(null)
+  try {
+    if (store.has(sourceId)) return Promise.resolve(store.get(sourceId) || null)
+  } catch {
+    return Promise.resolve(null)
+  }
+  return new Promise((resolve) => {
+    let settled = false
+    let timer = null
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(value || null)
+    }
+    timer = setTimeout(() => finish(null), Math.max(1, Number(timeoutMs) || 1500))
+    try {
+      store.get(sourceId, (data) => finish(data))
+    } catch {
+      finish(null)
+    }
+  })
+}
+
+/** Decode one painted PDF image and bake it, with its own transform, into PNG
+ * bytes. The result keeps the source pixels and orientation, so a moved or
+ * rotated image is redrawn from the original artwork. */
+export async function capturePdfImageSource(file, pageNumber, sourceId, combined, options = {}) {
+  if (!sourceId || !Array.isArray(combined) || combined.length < 6)
+    throw new Error('This image cannot be read from the PDF. Replace it with a file instead.')
+  const doc = await getPdfJsDocument(file)
+  const page = await doc.getPage(Number(pageNumber))
+  const source = await readPdfImageObject(
+    pdfImageObjectStore(page, sourceId),
+    sourceId,
+    options.timeoutMs,
+  )
+  if (!source) throw new Error('The image data is not ready. Try again in a moment.')
+  const width = Number(source.width) || Number(source.bitmap?.width) || 0
+  const height = Number(source.height) || Number(source.bitmap?.height) || 0
+  if (!width || !height) throw new Error('This image has no readable pixels.')
+  const { matrix, canvasWidth, canvasHeight } = captureImagePlacement(combined, width, height)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvasWidth
+  canvas.height = canvasHeight
+  const context = canvas.getContext('2d')
+  let sourceCanvas = null
+  try {
+    if (source.bitmap) sourceCanvas = source.bitmap
+    else if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) sourceCanvas = source
+    else if (source.data?.length === width * height * 4) {
+      sourceCanvas = document.createElement('canvas')
+      sourceCanvas.width = width
+      sourceCanvas.height = height
+      sourceCanvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(source.data), width, height), 0, 0)
+    } else if (source.data?.length === width * height * 3) {
+      const rgba = new Uint8ClampedArray(width * height * 4)
+      for (let p = 0, q = 0; p < source.data.length; p += 3, q += 4) { rgba[q] = source.data[p]; rgba[q + 1] = source.data[p + 1]; rgba[q + 2] = source.data[p + 2]; rgba[q + 3] = 255 }
+      sourceCanvas = document.createElement('canvas')
+      sourceCanvas.width = width
+      sourceCanvas.height = height
+      sourceCanvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0)
+    }
+    if (!sourceCanvas) throw new Error('This image format cannot be decoded in the editor.')
+    context.save()
+    context.setTransform(...matrix)
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(sourceCanvas, 0, 0, 1, 1)
+    context.restore()
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    canvas.width = 0
+    canvas.height = 0
+    if (!blob) throw new Error('Could not encode the image.')
+    return { data: new Uint8Array(await blob.arrayBuffer()), type: 'image/png', width: canvasWidth, height: canvasHeight }
+  } finally {
+    if (sourceCanvas && sourceCanvas !== source.bitmap && sourceCanvas !== source) { sourceCanvas.width = 0; sourceCanvas.height = 0 }
+  }
 }
 
 export function hydratePdfTextLayerStyles(container) {

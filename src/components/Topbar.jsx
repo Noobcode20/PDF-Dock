@@ -2,7 +2,7 @@ import React from 'react'
 import { Icon } from '../icons'
 import { allTools, categories } from '../toolsData'
 
-export function Topbar({ currentView, onNavigate, onOpenSearch }) {
+export function Topbar({ currentView, onNavigate, onOpenSearch, phoneLayout = false, mobileNavOpen = false, onToggleMobileNav }) {
   const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
   const isHome = currentView.type === 'home'
   // Build breadcrumb items based on current view
@@ -87,6 +87,7 @@ export function Topbar({ currentView, onNavigate, onOpenSearch }) {
   return (
     <header className="topbar">
       <div className="topbar-leading">
+        {phoneLayout && <button className="mobile-nav-toggle" type="button" onClick={onToggleMobileNav} aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={mobileNavOpen} aria-controls="workspace-sidebar"><Icon name="menu" size={19} /></button>}
         <div className="breadcrumbs">{renderBreadcrumbs()}</div>
       </div>
 

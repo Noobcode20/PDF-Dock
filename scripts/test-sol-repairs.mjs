@@ -44,6 +44,8 @@ pdf=await PDFDocument.load(fields);assert.equal(pdf.getForm().getTextField('Rena
 fields=await applyOperations(fields,[{type:'form-update',page:1,name:'new_checkbox',deleted:true}]);assert.equal((await PDFDocument.load(fields)).getForm().getFields().length,5);
 await assert.rejects(apply([{type:'form-create',page:1,name:'Name',kind:'text',x:.1,y:.1,width:.2,height:.03}]),/already exists/);
 const frame={width:800,height:600},op={x:.2,y:.3,width:.3,height:.2,original:{x:.1,y:.2,width:.2,height:.3},replacementData:new Uint8Array([1]),imageTransform:[0,.3,-.2,0,.3,.2]};
-const matrix=imagePlacement(frame,op),origin=transformPoint(matrix,0,0),far=transformPoint(matrix,1,1);assert.ok(Math.abs(origin[0]-(op.x+op.width)*frame.width)<1e-7);assert.ok(Math.abs(far[1]-(1-op.y-op.height)*frame.height)<1e-7);
+// The placement maps the source unit square onto the rect: (0,0) is the bottom
+// left of the rect in frame points and (1,1) is its top right.
+const matrix=imagePlacement(frame,op),origin=transformPoint(matrix,0,0),far=transformPoint(matrix,1,1);assert.ok(Math.abs(origin[0]-op.x*frame.width)<1e-7);assert.ok(Math.abs(origin[1]-(1-op.y-op.height)*frame.height)<1e-7);assert.ok(Math.abs(far[0]-(op.x+op.width)*frame.width)<1e-7);assert.ok(Math.abs(far[1]-(1-op.y)*frame.height)<1e-7);
 await fs.writeFile('tmp/sol-qa/engine-repaired.pdf',replacement);await fs.writeFile('tmp/sol-qa/engine-forms.pdf',fields);
 console.log('PASS repair regressions: 80 rotated/cropped/zoom frames, revision fences/save race, constrained text removal/visual fallback/overflow, five interactive field kinds, widget geometry/rename/delete, affine image placement.');

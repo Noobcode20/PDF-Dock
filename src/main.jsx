@@ -43,14 +43,19 @@ import { ALL_THEME_IDS, DEFAULT_THEME, isLightTheme, normalizeTheme, pairedTheme
 import { allTools, categories } from './toolsData'
 import { loadShortcuts } from './keyboardShortcuts'
 import { Icon } from './icons'
+import { installBrowserBridge, recentFilesBackend } from './recentFiles'
 
 const EMPTY_FILES = []
+
+// The web build gets the same guarded bridge surface as the desktop build so
+// recent files, printing and exports work in both places.
+installBrowserBridge()
 
 class AppErrorBoundary extends React.Component {
   state = { error: null }
   static getDerivedStateFromError(error) { return { error } }
   render() {
-    if (this.state.error) return <main className="renderer-error" role="alert"><h1>PDF King hit a problem</h1><p>{this.state.error?.message || 'The workspace could not be displayed.'}</p><button type="button" onClick={() => { this.setState({ error: null }); window.location.reload() }}>Reload workspace</button></main>
+    if (this.state.error) return <main className="renderer-error" role="alert"><h1>PDF Dock hit a problem</h1><p>{this.state.error?.message || 'The workspace could not be displayed.'}</p><button type="button" onClick={() => { this.setState({ error: null }); window.location.reload() }}>Reload workspace</button></main>
     return this.props.children
   }
 }
@@ -93,7 +98,7 @@ function UnsavedChangesDialog({ onDismiss, stage = 'file', error, onAccept, onCa
     <section className="confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-pdf-title" aria-describedby="unsaved-pdf-message" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); onCancel() } else if (event.key === 'Enter' && !event.repeat && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); onAccept() } }}>
       <div className="confirm-icon"><Icon name="file" size={18} /></div>
       <h2 className="confirm-title" id="unsaved-pdf-title">{applying ? 'Unsaved PDF changes' : 'Unsaved file'}</h2>
-      <p className="confirm-message" id="unsaved-pdf-message">{applying ? 'Apply your changes to this PDF in PDF King before leaving?' : 'Do you want to save your work to a file before leaving?'}</p>
+      <p className="confirm-message" id="unsaved-pdf-message">{applying ? 'Apply your changes to this PDF in PDF Dock before leaving?' : 'Do you want to save your work to a file before leaving?'}</p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="confirm-actions">
         <button type="button" className="confirm-btn" onClick={onDismiss}>Cancel</button>
@@ -262,11 +267,11 @@ function App() {
         try {
           const saved = await editorRef.current?.savePendingEdits()
           if (!saved) {
-            setLeaveError('The PDF could not be saved. Try again or cancel to keep it open in PDF King.')
+            setLeaveError('The PDF could not be saved. Try again or cancel to keep it open in PDF Dock.')
             return
           }
         } catch {
-          setLeaveError('The PDF could not be saved. Try again or cancel to keep it open in PDF King.')
+          setLeaveError('The PDF could not be saved. Try again or cancel to keep it open in PDF Dock.')
           return
         }
       }
@@ -281,10 +286,28 @@ function App() {
   }
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [phoneLayout, setPhoneLayout] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 620px)').matches)
   const [editorChromeVisible, setEditorChromeVisible] = useState(false)
   const [editTextRequest, setEditTextRequest] = useState(0)
   const initialTool = currentView.type === 'tool' ? allTools.find((tool) => tool.id === currentView.toolId) : null
   const isFullPdfEditor = currentView.type === 'tool' && (initialTool?.category === 'edit' || currentView.toolId === 'redact-pdf')
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 620px)')
+    const handleChange = (event) => { setPhoneLayout(event.matches); if (!event.matches) setMobileNavOpen(false) }
+    query.addEventListener('change', handleChange)
+    return () => query.removeEventListener('change', handleChange)
+  }, [])
+
+  useEffect(() => { setMobileNavOpen(false) }, [currentView])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined
+    const closeOnEscape = (event) => { if (event.key === 'Escape') { event.preventDefault(); setMobileNavOpen(false) } }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [mobileNavOpen])
 
   useEffect(() => {
     if (isFullPdfEditor) setEditorChromeVisible(false)
@@ -318,13 +341,6 @@ function App() {
   }, [currentView.type, theme])
 
   const handleNavigateNow = (view) => {
-    // Category navigation opens a tool directly; tool lists live in the sidebar.
-    if (view.type === 'category') {
-      const categoryTools = allTools.filter((tool) => tool.category === view.categoryId)
-      view = view.categoryId === 'edit'
-        ? { type: 'tool', toolId: 'pdf-editor' }
-        : { type: 'tool', toolId: categoryTools[0]?.id || 'pdf-editor' }
-    }
     setCurrentView(view)
     const activeId = activeTabIdRef.current
     setTabs((current) => current.map((tab) => tab.id === activeId ? { ...tab, view } : tab))
@@ -603,8 +619,9 @@ function App() {
     let files = []
     if (item.fileId) {
       try {
-        if (!window.pdfKing?.readRecentFile) throw new Error('Recent file storage is only available in the desktop app.')
-        const data = await window.pdfKing.readRecentFile(item.fileId)
+        const backend = recentFilesBackend()
+        if (!backend?.readRecentFile) throw new Error('This PDF could not be opened because local file storage is unavailable.')
+        const data = await backend.readRecentFile(item.fileId)
         if (!data) throw new Error('The selected recent PDF could not be read.')
         files = [new File([data], item.fileName, { type: 'application/pdf' })]
       } catch (error) { setActionError(error.message || 'Could not open this recent PDF.'); return }
@@ -809,18 +826,22 @@ function App() {
   }, [currentView, activeTabId, isNewDocumentOpen, isSearchOpen, contextMenu, tabs, showOnboarding, theme])
 
   return (
-    <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
+    <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${phoneLayout ? 'phone-layout' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible && !phoneLayout ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
       <a className="skip-link" href={`#workspace-panel-${activeTabId}`}>Skip to workspace</a>
       <TabBar tabs={tabs} activeTabId={activeTabId} dirtyTabIds={dirtyTabIds} onSelectTab={selectTab} onCloseTab={closeTab} onNewTab={createTab} getTitle={getTabTitle} onStartTabDrag={startTabDrag} onCancelTabDrag={cancelTabDrag} onReorderTab={reorderTab} onImportTab={importTabFromWindow} />
       <div className="tabs-spacer" style={{ height: '8px', background: 'transparent' }} />
       <div className="workspace-shell">
-        <Sidebar currentView={currentView} onNavigate={handleNavigate} onOpenNewDocument={handleOpenNewDocument} onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)} collapsed={sidebarCollapsed} theme={theme} userName={userName} />
+        {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
+        <Sidebar currentView={currentView} onNavigate={handleNavigate} onOpenNewDocument={handleOpenNewDocument} onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)} collapsed={sidebarCollapsed} theme={theme} userName={userName} phoneLayout={phoneLayout} onCloseMobileNav={() => setMobileNavOpen(false)} />
 
       <main className="main-area" id={`workspace-panel-${activeTabId}`} tabIndex={-1} role="tabpanel" aria-labelledby={`workspace-tab-${activeTabId}`} onContextMenu={handleWorkspaceContextMenu}>
         <Topbar
           currentView={currentView}
           onNavigate={handlePaletteNavigate}
           onOpenSearch={() => setIsSearchOpen(true)}
+          phoneLayout={phoneLayout}
+          mobileNavOpen={mobileNavOpen}
+          onToggleMobileNav={() => setMobileNavOpen((open) => !open)}
         />
 
         {currentView.type === 'home' && (
@@ -894,6 +915,7 @@ function App() {
         onNewWindow={handleOpenNewWindow}
         onOpenPdf={handleOpenPdf}
         onToggleTheme={handleToggleTheme}
+        onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onNewTab={createTab}
         size={commandPaletteSize}
       />

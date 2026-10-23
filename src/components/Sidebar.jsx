@@ -5,15 +5,17 @@ import { allTools, categories } from '../toolsData'
 
 const TOOL_CATEGORY_IDS = ['organize', 'convert', 'secure']
 
-export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCollapsed, collapsed, theme, userName = 'User' }) {
+export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCollapsed, collapsed, theme, userName = 'User', phoneLayout = false, onCloseMobileNav }) {
   const [expandedCategory, setExpandedCategory] = useState(null)
   const [flyout, setFlyout] = useState(null)
   const closeTimer = useRef(null)
   const visibleCategories = categories.filter((category) => TOOL_CATEGORY_IDS.includes(category.id))
+  const isCollapsed = collapsed && !phoneLayout
   const isEditorActive = currentView.type === 'tool' && currentView.toolId === 'pdf-editor'
   const isToolActive = (toolId) => currentView.type === 'tool' && currentView.toolId === toolId
   const cancelFlyoutClose = () => window.clearTimeout(closeTimer.current)
   const deferFlyoutClose = () => { closeTimer.current = window.setTimeout(() => setFlyout(null), 140) }
+  const navigate = (view) => { setFlyout(null); onNavigate(view); onCloseMobileNav?.() }
 
   useEffect(() => {
     if (currentView.type !== 'tool') return
@@ -42,8 +44,8 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
       className={`nav-subitem ${flyoutMode ? 'flyout-tool' : ''} ${isToolActive(tool.id) ? 'active' : ''}`}
       key={tool.id}
       type="button"
-      title={collapsed && !flyoutMode ? tool.name : undefined}
-      onClick={() => { setFlyout(null); onNavigate({ type: 'tool', toolId: tool.id }) }}
+      title={isCollapsed && !flyoutMode ? tool.name : undefined}
+      onClick={() => { setFlyout(null); navigate({ type: 'tool', toolId: tool.id }) }}
     >
       <Icon name={tool.icon} size={flyoutMode ? 17 : 15} />
       <span>{tool.name}</span>
@@ -54,24 +56,27 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
   const flyoutCategory = visibleCategories.find((category) => category.id === flyout?.categoryId)
 
   return <>
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="Main sidebar" data-theme={theme}>
-      <button className="brand-row clickable" type="button" onClick={() => onNavigate({ type: 'home' })} aria-label="PDF King home" title={collapsed ? 'PDF King' : undefined}>
-        <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
-        <span className="brand-name">PDF <span>King</span></span>
-      </button>
+    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${phoneLayout ? 'mobile-drawer' : ''}`} id="workspace-sidebar" aria-label="Main sidebar" data-theme={theme}>
+      <div className="sidebar-brand-row">
+        <button className="brand-row clickable" type="button" onClick={() => navigate({ type: 'home' })} aria-label="PDF Dock home" title={isCollapsed ? 'PDF Dock' : undefined}>
+          <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
+          <span className="brand-name">PDF <span>Dock</span></span>
+        </button>
+        {phoneLayout && <button className="sidebar-drawer-close" type="button" onClick={() => onCloseMobileNav?.()} aria-label="Close navigation menu"><Icon name="x" size={18} /></button>}
+      </div>
 
-      <button className="new-document" type="button" aria-label="New document" title={collapsed ? 'New document' : undefined} onClick={onOpenNewDocument}>
+      <button className="new-document" type="button" aria-label="New document" title={isCollapsed ? 'New document' : undefined} onClick={() => { onOpenNewDocument(); onCloseMobileNav?.() }}>
         <span className="new-document-icon"><Icon name="plus" size={20} /></span>
         <span className="new-document-label">New document</span>
-        {!collapsed && <Icon name="arrow" size={16} className="new-document-arrow" />}
+        {!isCollapsed && <Icon name="arrow" size={16} className="new-document-arrow" />}
       </button>
 
       <nav className="sidebar-navigation" aria-label="Workspace navigation">
         <div className="sidebar-workspace-label">WORKSPACE</div>
-        <button className={`nav-item ${currentView.type === 'home' ? 'active' : ''}`} type="button" aria-label="Home" title={collapsed ? 'Home' : undefined} onClick={() => onNavigate({ type: 'home' })}>
+        <button className={`nav-item ${currentView.type === 'home' ? 'active' : ''}`} type="button" aria-label="Home" title={isCollapsed ? 'Home' : undefined} onClick={() => navigate({ type: 'home' })}>
           <Icon name="home" size={19} /><span>Home</span>
         </button>
-        <button className={`nav-item ${isEditorActive ? 'active' : ''}`} type="button" aria-label="Editor" title={collapsed ? 'Editor' : undefined} onClick={() => onNavigate({ type: 'tool', toolId: 'pdf-editor' })}>
+        <button className={`nav-item ${isEditorActive ? 'active' : ''}`} type="button" aria-label="Editor" title={isCollapsed ? 'Editor' : undefined} onClick={() => navigate({ type: 'tool', toolId: 'pdf-editor' })}>
           <Icon name="cursor" size={19} /><span>Editor</span>
         </button>
 
@@ -86,37 +91,37 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
               className={`nav-item ${active ? 'active' : ''} ${expanded ? 'is-expanded' : ''}`}
               type="button"
               aria-label={category.label}
-              aria-expanded={collapsed ? undefined : expanded}
-              aria-controls={collapsed ? undefined : `sidebar-tools-${category.id}`}
-              title={collapsed ? category.label : undefined}
-              onMouseEnter={(event) => { if (collapsed) showFlyout(category, event.currentTarget) }}
-              onMouseLeave={() => { if (collapsed) deferFlyoutClose() }}
-              onFocus={(event) => { if (collapsed) showFlyout(category, event.currentTarget) }}
+              aria-expanded={isCollapsed ? undefined : expanded}
+              aria-controls={isCollapsed ? undefined : `sidebar-tools-${category.id}`}
+              title={isCollapsed ? category.label : undefined}
+              onMouseEnter={(event) => { if (isCollapsed) showFlyout(category, event.currentTarget) }}
+              onMouseLeave={() => { if (isCollapsed) deferFlyoutClose() }}
+              onFocus={(event) => { if (isCollapsed) showFlyout(category, event.currentTarget) }}
               onClick={() => {
-                if (collapsed) { expandedCategory === category.id ? setExpandedCategory(null) : setExpandedCategory(category.id); return }
+                if (isCollapsed) { expandedCategory === category.id ? setExpandedCategory(null) : setExpandedCategory(category.id); return }
                 setExpandedCategory((current) => current === category.id ? null : category.id)
               }}
             >
               <Icon name={category.icon} size={19} /><span>{category.label}</span>
               <Icon name="chevron" size={15} className="nav-disclosure" />
             </button>
-            {!collapsed && expanded && <div className="nav-submenu" id={`sidebar-tools-${category.id}`}>{renderToolList(category)}</div>}
+            {!isCollapsed && expanded && <div className="nav-submenu" id={`sidebar-tools-${category.id}`}>{renderToolList(category)}</div>}
           </div>
         })}
       </nav>
 
       <div className="sidebar-bottom">
-        {collapsed && <button type="button" className="sidebar-collapse-button sidebar-expand-button" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
-        <div className={`sidebar-footer-row ${collapsed ? 'is-collapsed' : ''}`}>
-          <button className={`sidebar-settings ${currentView.type === 'settings' ? 'active' : ''}`} type="button" title={collapsed ? `Settings for ${userName}` : undefined} onClick={() => onNavigate({ type: 'settings' })}>
+        {isCollapsed && <button type="button" className="sidebar-collapse-button sidebar-expand-button" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
+        <div className={`sidebar-footer-row ${isCollapsed ? 'is-collapsed' : ''}`}>
+          <button className={`sidebar-settings ${currentView.type === 'settings' ? 'active' : ''}`} type="button" title={isCollapsed ? `Settings for ${userName}` : undefined} onClick={() => navigate({ type: 'settings' })}>
             <Icon name="sliders" size={19} /><span>Settings</span>
           </button>
-          {!collapsed && <button type="button" className="sidebar-collapse-button" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
+          {!isCollapsed && !phoneLayout && <button type="button" className="sidebar-collapse-button" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
         </div>
       </div>
     </aside>
 
-    {collapsed && flyout && flyoutCategory && createPortal(
+    {isCollapsed && flyout && flyoutCategory && createPortal(
       <section
         className="sidebar-flyout"
         data-theme={theme}

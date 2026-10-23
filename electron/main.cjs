@@ -314,7 +314,7 @@ ipcMain.handle('pdfking:print-pdf', async (_event, { name, data }) => {
   if (typeof name !== 'string' || !/\.pdf$/i.test(name) || !data) throw new Error('A PDF file is required for printing.')
   const bytes = Buffer.from(data)
   if (!bytes.byteLength || bytes.byteLength > 1024 * 1024 * 1024) throw new Error('This PDF is empty or larger than the 1 GB print limit.')
-  const temporaryPath = path.join(os.tmpdir(), `pdf-king-print-${crypto.randomUUID()}.pdf`)
+  const temporaryPath = path.join(os.tmpdir(), `pdf-dock-print-${crypto.randomUUID()}.pdf`)
   await fs.writeFile(temporaryPath, bytes)
   const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
   const cleanup = async () => {
@@ -341,12 +341,12 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: '#17171b',
-    title: 'PDF King',
+    title: 'PDF Dock',
     ...(process.platform === 'darwin' ? {
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 14, y: 16 },
     } : {}),
-    icon: path.join(__dirname, '..', 'assets', 'pdf-king.png'),
+    icon: path.join(__dirname, '..', 'assets', 'pdf-dock.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -382,9 +382,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  app.setName('PDF King')
+  app.setName('PDF Dock')
   if (process.platform === 'darwin') {
-    app.dock.setIcon(path.join(__dirname, '..', 'assets', 'pdf-king.png'))
+    app.dock.setIcon(path.join(__dirname, '..', 'assets', 'pdf-dock.png'))
   }
   createWindow()
 

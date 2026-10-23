@@ -1,3 +1,5 @@
+import { printPdfDocument, recentFileId, recentFilesBackend } from './recentFiles'
+
 export async function saveOutput(output, { recordRecent = true } = {}) {
   let location = ''
   if (window.pdfKing?.saveFile) {
@@ -13,13 +15,15 @@ export async function saveOutput(output, { recordRecent = true } = {}) {
     anchor.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  if (recordRecent && window.localStorage.getItem('pdfking-keep-recent') !== 'false' && /\.pdf$/i.test(output.name) && window.pdfKing?.addRecentFile) {
+  if (recordRecent && window.localStorage.getItem('pdfking-keep-recent') !== 'false' && /\.pdf$/i.test(output.name)) {
+    const backend = recentFilesBackend()
+    if (!backend?.addRecentFile) return location || true
     let pages = 0
     try {
       const { PDFDocument } = await import('pdf-lib')
       pages = (await PDFDocument.load(output.data, { ignoreEncryption: true })).getPageCount()
     } catch { /* Keep the output available even if metadata cannot be read. */ }
-    try { await window.pdfKing.addRecentFile({ name: output.name, data: output.data, size: output.data.byteLength, pages, sourcePath: location || null }) }
+    try { await backend.addRecentFile({ name: output.name, data: output.data, size: output.data.byteLength, pages, sourcePath: location || null }) }
     catch (error) { console.warn('The PDF was saved, but it could not be added to recent files.', error) }
   }
   return location || true
@@ -28,28 +32,33 @@ export async function saveOutput(output, { recordRecent = true } = {}) {
 const rememberedPdfs = new WeakMap()
 
 export async function rememberPdf(file) {
-  if (window.localStorage.getItem('pdfking-keep-recent') === 'false' || !window.pdfKing?.addRecentFile || !file?.name?.toLowerCase().endsWith('.pdf')) return
+  if (window.localStorage.getItem('pdfking-keep-recent') === 'false' || !file?.name?.toLowerCase().endsWith('.pdf')) return
+  const backend = recentFilesBackend()
+  if (!backend?.addRecentFile) return
   if (rememberedPdfs.has(file)) return rememberedPdfs.get(file)
-  const pending = rememberPdfOnce(file)
+  const pending = rememberPdfOnce(file, backend)
   rememberedPdfs.set(file, pending)
   try { return await pending } catch (error) { rememberedPdfs.delete(file); throw error }
 }
 
-async function rememberPdfOnce(file) {
+async function rememberPdfOnce(file, backend) {
   const data = new Uint8Array(await file.arrayBuffer())
   let pages = 0
   try {
     const { PDFDocument } = await import('pdf-lib')
     pages = (await PDFDocument.load(data, { ignoreEncryption: true })).getPageCount()
   } catch { /* Keep history for damaged files too. */ }
-  try { await window.pdfKing.addRecentFile({ name: file.name, data, size: file.size, pages, sourcePath: file.sourcePath || null }) }
+  try { await backend.addRecentFile({ name: file.name, data, size: file.size, pages, sourcePath: file.sourcePath || null }) }
   catch (error) { console.warn('The PDF could not be added to recent files.', error) }
 }
 
 export async function forgetPdfCopy(file) {
-  if (!window.pdfKing?.removeRecentFile || !file?.arrayBuffer) return
+  if (!file?.arrayBuffer) return
+  const backend = recentFilesBackend()
+  if (!backend?.removeRecentFile) return
   const identity = file.sourcePath ? new TextEncoder().encode(window.pdfKing?.platform === 'win32' ? file.sourcePath.toLowerCase().replaceAll('/', String.fromCharCode(92)) : file.sourcePath) : await file.arrayBuffer()
-  const digest = await crypto.subtle.digest('SHA-256', identity)
-  const id = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('').slice(0, 40)
-  await window.pdfKing.removeRecentFile(id)
+  const id = await recentFileId(identity)
+  await backend.removeRecentFile(id)
 }
+
+export { printPdfDocument }

@@ -8,6 +8,8 @@ import {
   popGraphicsState,
   concatTransformationMatrix,
   rectangle, clip, endPath,
+  moveTo, lineTo, closePath, fill,
+  setFillingRgbColor,
   PDFName,
   PDFHexString,
 } from "pdf-lib";
@@ -15,9 +17,11 @@ import {
   displayFrame,
   displayRect,
   pdfRect,
+  reframeRegion,
   textFrame,
   imagePlacement,
 } from "./coordinates.js";
+import { sourceCropWindow } from "./imageModel.js";
 import { resolveFont, resolveTextRuns, wrapText } from "./fonts.js";
 const color = (value = "#111111") => {
   const m = String(value).match(/^#([0-9a-f]{6})$/i);
@@ -34,6 +38,41 @@ function withFrame(page, frame, fn) {
   } finally {
     page.pushOperators(popGraphicsState());
   }
+}
+/** Cover the area the source image occupied.
+ *
+ * The original artwork cannot be removed from a PDF content stream, so the
+ * region is painted with the sampled page background. The exact source quad is
+ * used when it is known so unrelated page content around the image survives. */
+function coverImageSource(page, frame, operation) {
+  const quad =
+    Array.isArray(operation.originalQuad) && operation.originalQuad.length === 4
+      ? operation.originalQuad
+      : (() => {
+          const rect = displayRect(frame, operation.original || operation);
+          return [
+            { x: rect.x / frame.width, y: 1 - rect.y / frame.height },
+            { x: (rect.x + rect.width) / frame.width, y: 1 - rect.y / frame.height },
+            { x: (rect.x + rect.width) / frame.width, y: 1 - (rect.y + rect.height) / frame.height },
+            { x: rect.x / frame.width, y: 1 - (rect.y + rect.height) / frame.height },
+          ];
+        })();
+  const points = quad.map((point) => [
+    Number(point.x) * frame.width,
+    (1 - Number(point.y)) * frame.height,
+  ]);
+  const fillColor = color(operation.backgroundColor || "#FFFFFF");
+  page.pushOperators(
+    pushGraphicsState(),
+    setFillingRgbColor(fillColor.red, fillColor.green, fillColor.blue),
+    moveTo(points[0][0], points[0][1]),
+    lineTo(points[1][0], points[1][1]),
+    lineTo(points[2][0], points[2][1]),
+    lineTo(points[3][0], points[3][1]),
+    closePath(),
+    fill(),
+    popGraphicsState(),
+  );
 }
 export async function applyOperations(bytes, operations, { fonts = {} } = {}) {
   const pdf = await PDFDocument.load(bytes, { updateMetadata: false });
@@ -140,8 +179,10 @@ export async function applyOperations(bytes, operations, { fonts = {} } = {}) {
                 size: run.size,
                 font: run.font,
                 color: color(run.color),
+                opacity: Math.max(0, Math.min(1, Number(operation.opacity ?? 1))),
+                characterSpacing: Number(operation.letterSpacingPt) || 0,
               });
-              cursor += run.width;
+              cursor += run.width + Math.max(0, run.text.length - 1) * (Number(operation.letterSpacingPt) || 0);
             }
           });
           page.pushOperators(popGraphicsState());
@@ -157,19 +198,36 @@ export async function applyOperations(bytes, operations, { fonts = {} } = {}) {
             ? await pdf.embedJpg(data)
             : await pdf.embedPng(data)
           : null;
-      withFrame(page, frame, () => {
-        if (!operation.isNew)
-          page.drawRectangle({
-            ...displayRect(frame, operation.original || operation),
-            color: color(operation.backgroundColor || "#FFFFFF"),
-          });
-        if (image) {
-          const bounds = displayRect(frame, operation);
-          page.pushOperators(pushGraphicsState(), rectangle(bounds.x, bounds.y, bounds.width, bounds.height), clip(), endPath(), concatTransformationMatrix(...imagePlacement(frame, operation)));
+      /* The cover belongs to the page area the artwork came from, so it stays
+       * in the frame the user was looking at. */
+      if (!operation.isNew)
+        withFrame(page, frame, () => {
+          coverImageSource(page, frame, operation);
+        });
+      if (image) {
+        /* The viewer rotation is a view setting and must not end up in the
+         * saved file. The placement is moved into the page's own frame, the
+         * way the redaction path normalises a mark to rotation 0, so the image
+         * keeps the orientation the user gave it instead of inheriting the
+         * rotation of the window. */
+        const viewerRotation = Number(operation.viewerRotation) || 0;
+        const placementFrame = viewerRotation ? displayFrame(page, 0) : frame;
+        const placement = viewerRotation
+          ? reframeRegion(page, { ...operation, viewerRotation }, 0)
+          : operation;
+        const window = sourceCropWindow(operation.crop);
+        withFrame(page, placementFrame, () => {
+          page.pushOperators(
+            pushGraphicsState(),
+            concatTransformationMatrix(...imagePlacement(placementFrame, placement)),
+            rectangle(window.left, window.bottom, window.width, window.height),
+            clip(),
+            endPath(),
+          );
           page.drawImage(image, { x: 0, y: 0, width: 1, height: 1 });
           page.pushOperators(popGraphicsState());
-        }
-      });
+        });
+      }
       continue;
     }
     if (type === "annotation") {
