@@ -53,6 +53,7 @@
         "provider": "github",
         "owner": "Noobcode20",
         "repo": "PDF-Dock",
+        "channel": "beta",
         "releaseType": "prerelease"
       }
     ],
