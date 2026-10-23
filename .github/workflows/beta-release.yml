@@ -50,11 +50,16 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mapfile -d '' assets < <(find release -type f -print0)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No installer or updater metadata files were downloaded."
+            exit 1
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release/* \
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release/* \
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --title "PDF Dock $GITHUB_REF_NAME" \
               --prerelease \
