@@ -36,5 +36,13 @@ contextBridge.exposeInMainWorld('pdfKing', {
   readQpdfWasm: (assetName) => ipcRenderer.invoke('pdfking:read-qpdf-wasm', assetName),
   convertType1Fonts: (data) => ipcRenderer.invoke('pdfking:convert-type1-fonts', data),
   readSystemFont: (face) => ipcRenderer.invoke('pdfking:read-system-font', face),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('pdfking:update-state', listener)
+    return () => ipcRenderer.removeListener('pdfking:update-state', listener)
+  },
+  skipUpdateVersion: (version) => ipcRenderer.invoke('pdfking:skip-update-version', version),
+  getUpdateState: () => ipcRenderer.invoke('pdfking:get-update-state'),
+  downloadUpdate: () => ipcRenderer.invoke('pdfking:download-update'),
   platform: process.platform,
 })

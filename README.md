@@ -6,10 +6,10 @@ PDF Dock is a local-first Electron workspace for common PDF operations. PDF and 
 
 PDF Dock beta installers are available for macOS and Windows. Choose the installer for your computer:
 
-- [Download for macOS (Apple Silicon)](https://github.com/Noobcode20/PDF-King-Desktop/releases/download/v0.1.0-beta.2/PDF-Dock-macOS-arm64.dmg)
-- [Download for macOS (Intel)](https://github.com/Noobcode20/PDF-King-Desktop/releases/download/v0.1.0-beta.2/PDF-Dock-macOS-x64.dmg)
-- [Download for Windows (.exe)](https://github.com/Noobcode20/PDF-King-Desktop/releases/download/v0.1.0-beta.2/PDF-Dock-Windows.exe)
-- [View all beta releases](https://github.com/Noobcode20/PDF-King-Desktop/releases)
+- [Download for macOS (Apple Silicon)](https://github.com/Noobcode20/PDF-Dock/releases/download/v0.1.0-beta.3/PDF-Dock-macOS-arm64.dmg)
+- [Download for macOS (Intel)](https://github.com/Noobcode20/PDF-Dock/releases/download/v0.1.0-beta.3/PDF-Dock-macOS-x64.dmg)
+- [Download for Windows (.exe)](https://github.com/Noobcode20/PDF-Dock/releases/download/v0.1.0-beta.3/PDF-Dock-Windows.exe)
+- [View all beta releases](https://github.com/Noobcode20/PDF-Dock/releases)
 
 These beta builds are unsigned. macOS may ask you to approve opening the app in Privacy & Security, and Windows may show a SmartScreen prompt.
 

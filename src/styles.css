@@ -1764,6 +1764,15 @@ input:checked + .slider-round:before { transform: translateX(16px); }
 .confirm-btn kbd { margin-left: 3px; padding: 2px 5px; border: 1px solid currentColor; border-radius: 4px; color: inherit; background: transparent; font: inherit; font-size: 9px; line-height: 1.2; opacity: .85; }
 .confirm-key-hint { min-width: 18px; padding: 2px 4px; border: 1px solid currentColor; border-radius: 4px; color: inherit; background: rgb(0 0 0 / 12%); font-family: inherit; font-size: 9px; font-weight: 600; line-height: 1.1; text-align: center; }
 .confirm-btn-outline-danger .confirm-key-hint { color: inherit; border-color: currentColor; background: transparent; }
+.update-dialog .confirm-icon { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-border); }
+.update-dialog .confirm-message { line-height: 1.55; }
+.update-dialog .confirm-actions { align-items: center; flex-wrap: wrap; }
+.update-dialog .confirm-btn { min-height: 38px; }
+.update-dialog .confirm-btn:disabled { cursor: progress; opacity: .72; }
+.update-dialog .confirm-btn kbd { margin-left: 4px; }
+.update-progress { height: 5px; margin-top: 18px; overflow: hidden; border-radius: 99px; background: var(--panel-hover); }
+.update-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+.update-status { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
 .workspace-context-menu { position: fixed; z-index: 650; width: 276px; max-height: min(430px, calc(100vh - 24px)); overflow: auto; padding: 5px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--panel); box-shadow: 0 14px 42px rgb(0 0 0 / 34%); animation: fadeIn .1s ease; }
 .workspace-context-menu button { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 5px; color: var(--text); background: transparent; text-align: left; font-size: 11px; cursor: pointer; }
 .workspace-context-menu button svg { flex: 0 0 auto; color: var(--muted); }

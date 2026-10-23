@@ -19,11 +19,11 @@ jobs:
           - platform: macOS
             runner: macos-latest
             script: package:mac
-            asset: release/*.dmg
+            asset: release/**
           - platform: Windows
             runner: windows-latest
             script: package:win
-            asset: release/*.exe
+            asset: release/**
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

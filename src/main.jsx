@@ -109,6 +109,32 @@ function UnsavedChangesDialog({ onDismiss, stage = 'file', error, onAccept, onCa
   </div>
 }
 
+function UpdateDialog({ update, onSkip, onUpdate }) {
+  const downloading = update.status === 'downloading'
+  const downloaded = update.status === 'downloaded'
+  const failed = update.status === 'error'
+  const macDownload = window.pdfKing?.platform === 'darwin'
+  const updateLabel = downloaded ? 'Restart to Update' : downloading ? 'Downloading…' : failed ? 'Retry Update' : macDownload ? 'Download Update' : 'Update'
+  return <div className="confirm-backdrop update-backdrop" role="presentation">
+    <section className="confirm-panel update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="update-dialog-title" aria-describedby="update-dialog-message" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+      event.stopPropagation()
+      if (event.key === 'Escape') { event.preventDefault(); onSkip() }
+      else if (event.key === 'Enter' && !event.repeat) { event.preventDefault(); onUpdate() }
+    }}>
+      <div className="confirm-icon"><Icon name="fileDown" size={18} /></div>
+      <h2 className="confirm-title" id="update-dialog-title">A new version is available</h2>
+      <p className="confirm-message" id="update-dialog-message">PDF Dock {update.version} is ready. Update now to get the latest improvements.</p>
+      {downloading && <div className="update-progress" aria-label={`Downloading update ${update.percent || 0}%`}><span style={{ width: `${Math.max(0, Math.min(100, update.percent || 0))}%` }} /></div>}
+      {downloading && <p className="update-status" aria-live="polite">Downloading update… {update.percent || 0}%</p>}
+      {failed && <p className="form-error" role="alert">{update.message || 'The update could not be downloaded. Try again.'}</p>}
+      <div className="confirm-actions">
+        <button type="button" className="confirm-btn" onClick={onSkip}>Skip this version<kbd className="confirm-key-hint">Esc</kbd></button>
+        <button type="button" className="confirm-btn confirm-btn-primary" onClick={onUpdate} data-dialog-accept autoFocus disabled={downloading}><span>{updateLabel}</span>{!downloading && <kbd className="confirm-key-hint" aria-label="Return">↵</kbd>}</button>
+      </div>
+    </section>
+  </div>
+}
+
 function App() {
   // Navigation State
   // { type: 'home' } | { type: 'category', categoryId } | { type: 'tool', toolId } |
@@ -138,6 +164,7 @@ function App() {
   const [commandPaletteSize, setCommandPaletteSize] = useState(() => window.localStorage.getItem('pdfking-command-palette-size') === 'maximized' ? 'maximized' : 'compact')
   const [contextMenu, setContextMenu] = useState(null)
   const [actionError, setActionError] = useState('')
+  const [updateInfo, setUpdateInfo] = useState(null)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (window.localStorage.getItem('pdfking-onboarding-complete') === 'true') return false
     const existingSetupKeys = ['pdf-king-theme', 'pdfking-user-name', 'pdf-king-auto-theme', 'pdfking-keep-recent']
@@ -160,6 +187,28 @@ function App() {
   })
   const [userName, setUserName] = useState(() => window.localStorage.getItem('pdfking-user-name') || 'User')
   const [userAvatar, setUserAvatar] = useState(() => window.localStorage.getItem('pdfking-user-avatar') || null)
+
+  useEffect(() => {
+    if (!window.pdfKing?.onUpdateState) return undefined
+    const applyUpdateState = (state) => {
+      if (state?.status === 'available' || state?.status === 'downloading' || state?.status === 'downloaded' || state?.status === 'error') setUpdateInfo(state)
+    }
+    const unsubscribe = window.pdfKing.onUpdateState(applyUpdateState)
+    void window.pdfKing.getUpdateState?.().then(applyUpdateState)
+    return unsubscribe
+  }, [])
+
+  const skipUpdate = useCallback(() => {
+    const version = updateInfo?.version
+    if (version) void window.pdfKing?.skipUpdateVersion?.(version)
+    setUpdateInfo(null)
+  }, [updateInfo])
+
+  const startUpdate = useCallback(() => {
+    if (updateInfo?.status === 'downloading') return
+    if (window.pdfKing?.platform !== 'darwin' && updateInfo?.status !== 'downloaded') setUpdateInfo((current) => current ? { ...current, status: 'downloading', percent: 0 } : current)
+    void window.pdfKing?.downloadUpdate?.().catch((error) => setUpdateInfo((current) => current ? { ...current, status: 'error', message: error?.message } : current))
+  }, [updateInfo])
 
   useEffect(() => {
     const syncStorage = (event) => {
@@ -922,6 +971,7 @@ function App() {
       <Onboarding isOpen={showOnboarding} theme={theme} onSelectTheme={handleSelectTheme} onFinish={handleFinishOnboarding} />
       <PasswordDialog />
       {leaveRequest && <UnsavedChangesDialog stage={leaveRequest.stage} error={leaveError} onDismiss={() => {setLeaveRequest(null); setLeaveError(''); window.pdfKing?.cancelCloseWindow?.()}} onAccept={() => resolveLeaveRequest()} onCancel={cancelLeaveRequest} />}
+      {updateInfo && <UpdateDialog update={updateInfo} onSkip={skipUpdate} onUpdate={startUpdate} />}
     </div>
   )
 }

@@ -2,6 +2,7 @@ const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
@@ -9,6 +10,82 @@ const os = require('node:os')
 
 const recentDirectory = () => path.join(app.getPath('userData'), 'recent-files')
 const recentIndex = () => path.join(recentDirectory(), 'index.json')
+const updatePreferencesPath = () => path.join(app.getPath('userData'), 'update-preferences.json')
+let skippedUpdateVersion = null
+let updatePreferencesQueue = Promise.resolve()
+let currentUpdateState = null
+let updateIsDownloaded = false
+let availableUpdateVersion = null
+
+async function readUpdatePreferences() {
+  try {
+    const preferences = JSON.parse(await fs.readFile(updatePreferencesPath(), 'utf8'))
+    skippedUpdateVersion = typeof preferences.skippedVersion === 'string' ? preferences.skippedVersion : null
+  } catch { skippedUpdateVersion = null }
+}
+
+function saveSkippedUpdateVersion(version) {
+  updatePreferencesQueue = updatePreferencesQueue.then(async () => {
+    await fs.mkdir(app.getPath('userData'), { recursive: true })
+    await fs.writeFile(updatePreferencesPath(), JSON.stringify({ skippedVersion: version }), 'utf8')
+    skippedUpdateVersion = version
+  })
+  return updatePreferencesQueue
+}
+
+function broadcastUpdateState(state) {
+  currentUpdateState = state
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('pdfking:update-state', state)
+  }
+}
+
+function configureAutoUpdates() {
+  if (!app.isPackaged) return
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.allowPrerelease = true
+  autoUpdater.on('update-available', (info) => {
+    if (info.version === skippedUpdateVersion) return
+    availableUpdateVersion = info.version
+    broadcastUpdateState({ status: 'available', version: info.version })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    if (availableUpdateVersion !== skippedUpdateVersion) broadcastUpdateState({ status: 'downloading', version: availableUpdateVersion, percent: Math.round(progress.percent || 0) })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    if (info.version === skippedUpdateVersion) return
+    updateIsDownloaded = true
+    broadcastUpdateState({ status: 'downloaded', version: info.version })
+  })
+  autoUpdater.on('error', (error) => {
+    if (availableUpdateVersion && availableUpdateVersion !== skippedUpdateVersion) broadcastUpdateState({ status: 'error', version: availableUpdateVersion, message: error?.message || 'The update could not be downloaded.' })
+    else console.warn('Could not check for PDF Dock updates:', error?.message || error)
+  })
+  void autoUpdater.checkForUpdates().catch((error) => console.warn('Could not check for PDF Dock updates:', error?.message || error))
+}
+
+ipcMain.handle('pdfking:skip-update-version', async (_event, version) => {
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+/.test(version)) return false
+  await saveSkippedUpdateVersion(version)
+  if (currentUpdateState?.version === version) currentUpdateState = null
+  return true
+})
+ipcMain.handle('pdfking:get-update-state', () => currentUpdateState)
+ipcMain.handle('pdfking:download-update', async () => {
+  if (!app.isPackaged) return false
+  if (process.platform === 'darwin') {
+    if (!availableUpdateVersion || !/^\d+\.\d+\.\d+/.test(availableUpdateVersion)) return false
+    await shell.openExternal(`https://github.com/Noobcode20/PDF-Dock/releases/tag/v${availableUpdateVersion}`)
+    return true
+  }
+  if (updateIsDownloaded) {
+    autoUpdater.quitAndInstall(false, true)
+    return true
+  }
+  await autoUpdater.downloadUpdate()
+  return true
+})
 const systemFontPaths = {
   'Arial-Regular': {
     darwin: ['/System/Library/Fonts/Supplemental/Arial.ttf'],
@@ -363,6 +440,9 @@ function createWindow() {
   })
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('did-finish-load', () => {
+    if (currentUpdateState && !window.isDestroyed()) window.webContents.send('pdfking:update-state', currentUpdateState)
+  })
   window.webContents.on('will-navigate', (event, target) => {
     if (!isAppRendererURL(target, app.getAppPath())) event.preventDefault()
   })
@@ -381,12 +461,14 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setName('PDF Dock')
+  await readUpdatePreferences()
   if (process.platform === 'darwin') {
     app.dock.setIcon(path.join(__dirname, '..', 'assets', 'pdf-dock.png'))
   }
   createWindow()
+  configureAutoUpdates()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
