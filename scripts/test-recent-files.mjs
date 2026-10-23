@@ -30,6 +30,8 @@ vm.runInNewContext(source, {
           ? require("../electron/rendererOrigin.cjs")
         : name === "./fontCompression.cjs"
           ? require("../electron/fontCompression.cjs")
+        : name === "electron-updater"
+          ? { autoUpdater: {} }
         : require(name),
   __dirname: path.join(process.cwd(), "electron"),
   process,
