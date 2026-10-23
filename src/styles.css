@@ -2006,7 +2006,7 @@ input:checked + .slider-round:before { transform: translateX(16px); }
 .pdf-text-edit-preview.is-editable-text { overflow: hidden; }
 .pdf-editor-context-options > small { font-size: 11px; line-height: 1.4; }
 
-/* PDF editor visual refresh, based on pdf-editor.html. */
+/* PDF editor visual refresh. */
 .full-pdf-editor-mode .pdf-editor-workspace { font-family:var(--font-body,'Inter'),-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color-scheme:light; }
 .app-shell[data-theme$='-dark'] .pdf-editor-workspace { color-scheme:dark; }
 .full-pdf-editor-mode .pdf-editor-header {
