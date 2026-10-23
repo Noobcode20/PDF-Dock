@@ -1,6 +1,6 @@
 {
   "name": "pdf-dock-desktop",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": true,
   "productName": "PDF Dock",
   "description": "A clean desktop PDF workspace.",
@@ -9,8 +9,8 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http://127.0.0.1:5174 && node scripts/launch-electron.cjs\"",
     "build": "vite build",
     "check": "npm run build",
-    "package:mac": "npm run build && electron-builder --mac dmg --universal",
-    "package:win": "npm run build && electron-builder --win nsis --x64",
+    "package:mac": "npm run build && electron-builder --mac dmg --x64 --arm64 --publish never",
+    "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs",
     "test:repairs": "node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs"
   },
@@ -66,11 +66,12 @@
         {
           "target": "dmg",
           "arch": [
-            "universal"
+            "x64",
+            "arm64"
           ]
         }
       ],
-      "artifactName": "PDF-Dock-macOS.${ext}"
+      "artifactName": "PDF-Dock-macOS-${arch}.${ext}"
     },
     "win": {
       "icon": "assets/pdf-dock.ico",

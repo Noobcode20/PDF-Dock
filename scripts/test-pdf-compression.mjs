@@ -15,7 +15,7 @@ const optimize = (data) => optimizePdfDocument(data, { toolkit })
 // page, unused resources, uncompressed streams and uncompressed dictionaries.
 const textOnly = await PDFDocument.create()
 textOnly.registerFontkit(fontkit)
-const fontBytes = await readFile('/System/Library/Fonts/Supplemental/Arial.ttf')
+const fontBytes = await readFile(new URL('../public/fonts/NotoSans-Regular.ttf', import.meta.url))
 for (let number = 1; number <= 6; number += 1) {
   const font = await textOnly.embedFont(fontBytes)
   const page = textOnly.addPage([600, 800])
