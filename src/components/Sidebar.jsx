@@ -5,7 +5,7 @@ import { allTools, categories } from '../toolsData'
 
 const TOOL_CATEGORY_IDS = ['organize', 'convert', 'secure']
 
-export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCollapsed, collapsed, theme, userName = 'User', phoneLayout = false, onCloseMobileNav }) {
+export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCollapsed, collapsed, theme, phoneLayout = false, onCloseMobileNav }) {
   const [expandedCategory, setExpandedCategory] = useState(null)
   const [flyout, setFlyout] = useState(null)
   const closeTimer = useRef(null)
@@ -113,7 +113,7 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
       <div className="sidebar-bottom">
         {isCollapsed && <button type="button" className="sidebar-collapse-button sidebar-expand-button" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
         <div className={`sidebar-footer-row ${isCollapsed ? 'is-collapsed' : ''}`}>
-          <button className={`sidebar-settings ${currentView.type === 'settings' ? 'active' : ''}`} type="button" title={isCollapsed ? `Settings for ${userName}` : undefined} onClick={() => navigate({ type: 'settings' })}>
+          <button className={`sidebar-settings ${currentView.type === 'settings' ? 'active' : ''}`} type="button" title={isCollapsed ? 'Settings' : undefined} onClick={() => navigate({ type: 'settings' })}>
             <Icon name="sliders" size={19} /><span>Settings</span>
           </button>
           {!isCollapsed && !phoneLayout && <button type="button" className="sidebar-collapse-button" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
