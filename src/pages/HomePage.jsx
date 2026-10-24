@@ -240,7 +240,7 @@ function ConfirmDialog({ isOpen, onClose, fileName, bulkCount = 0, onDelete }) {
   )
 }
 
-export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
+export function HomePage({ theme, onNavigate, onOpenPdf }) {
   const [files, setFiles] = useState([])
   const [error, setError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -581,7 +581,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         <div>
           <div className="home-breadcrumb"><span>WORKSPACE</span><span>/</span><strong>PDF LIBRARY</strong></div>
           <h1 className="home-greeting">Your PDF <span>workspace</span></h1>
-          <p className="home-subtitle">Welcome back, {userName}. Pick up where you left off.</p>
+          <p className="home-subtitle">Pick up where you left off.</p>
         </div>
       </section>
 

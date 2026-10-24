@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('pdfKing', {
   closeWindow: () => ipcRenderer.invoke('pdfking:close-window'),
   allowCloseWindow: () => ipcRenderer.invoke('pdfking:allow-close-window'),
   cancelCloseWindow: () => ipcRenderer.invoke('pdfking:cancel-close-window'),
+  markRendererReady: () => ipcRenderer.invoke('pdfking:renderer-ready'),
   switchWindow: (direction) => ipcRenderer.invoke('pdfking:switch-window', direction),
   beginTabDrag: (transferId, tabId) => ipcRenderer.invoke('pdfking:begin-tab-drag', transferId, tabId),
   publishTabDrag: (transferId, payload) => ipcRenderer.invoke('pdfking:publish-tab-drag', transferId, payload),

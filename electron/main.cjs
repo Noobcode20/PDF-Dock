@@ -2,7 +2,6 @@ const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
-const { autoUpdater } = require('electron-updater')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
@@ -42,6 +41,7 @@ function broadcastUpdateState(state) {
 
 function configureAutoUpdates() {
   if (!app.isPackaged) return
+  const { autoUpdater } = require('electron-updater')
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = true
@@ -74,6 +74,7 @@ ipcMain.handle('pdfking:skip-update-version', async (_event, version) => {
 ipcMain.handle('pdfking:get-update-state', () => currentUpdateState)
 ipcMain.handle('pdfking:download-update', async () => {
   if (!app.isPackaged) return false
+  const { autoUpdater } = require('electron-updater')
   if (process.platform === 'darwin') {
     if (!availableUpdateVersion || !/^\d+\.\d+\.\d+/.test(availableUpdateVersion)) return false
     await shell.openExternal(`https://github.com/Noobcode20/PDF-Dock/releases/tag/v${availableUpdateVersion}`)
@@ -256,6 +257,12 @@ ipcMain.handle('pdfking:cancel-close-window', (event) => {
   clearTimeout(window.__pdfKingCloseFallback)
   return true
 })
+ipcMain.handle('pdfking:renderer-ready', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window || window.isDestroyed()) return false
+  window.__pdfKingRendererReady = true
+  return true
+})
 ipcMain.handle('pdfking:switch-window', (event, direction = 1) => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed())
   if (windows.length < 2) return false
@@ -433,6 +440,10 @@ function createWindow() {
 
   window.on('close', (event) => {
     if (window.__pdfKingCloseAllowed) { clearTimeout(window.__pdfKingCloseFallback); return }
+    // A close request can arrive before React has installed its unsaved-work
+    // listener (startup, a failed chunk load, or a renderer reload). Nothing
+    // can be dirty yet, so let Electron close instead of trapping the user.
+    if (!window.__pdfKingRendererReady) return
     event.preventDefault()
     if (window.__pdfKingClosePending) return
     window.__pdfKingClosePending = true

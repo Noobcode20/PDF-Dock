@@ -1,6 +1,6 @@
 {
   "name": "pdf-dock-desktop",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "private": true,
   "productName": "PDF Dock",
   "description": "A clean desktop PDF workspace.",
@@ -71,6 +71,7 @@
     "asar": true,
     "mac": {
       "category": "public.app-category.productivity",
+      "identity": "-",
       "icon": "assets/pdf-dock.icns",
       "target": [
         {

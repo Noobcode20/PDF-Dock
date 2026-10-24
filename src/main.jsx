@@ -1,5 +1,5 @@
 import { PasswordDialog } from './editor/PasswordDialog'
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource/outfit/latin-400.css'
 import '@fontsource/outfit/latin-500.css'
@@ -31,10 +31,10 @@ import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { TabBar } from './components/TabBar'
 import { CommandPalette } from './components/CommandPalette'
-import { Onboarding } from './components/Onboarding'
 import { HomePage } from './pages/HomePage'
 import { CategoryPage } from './pages/CategoryPage'
-import { PdfEditorWorkspace, ToolStudioPage } from './pages/ToolStudioPage'
+const PdfEditorWorkspace = lazy(() => import('./pages/ToolStudioPage').then((module) => ({ default: module.PdfEditorWorkspace })))
+const ToolStudioPage = lazy(() => import('./pages/ToolStudioPage').then((module) => ({ default: module.ToolStudioPage })))
 import { NewDocumentPage } from './pages/NewDocumentPage'
 import { RecentFilesPage } from './pages/RecentFilesPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -165,19 +165,18 @@ function App() {
   const [contextMenu, setContextMenu] = useState(null)
   const [actionError, setActionError] = useState('')
   const [updateInfo, setUpdateInfo] = useState(null)
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    if (window.localStorage.getItem('pdfking-onboarding-complete') === 'true') return false
-    const existingSetupKeys = ['pdf-king-theme', 'pdfking-user-name', 'pdf-king-auto-theme', 'pdfking-keep-recent']
-    return !existingSetupKeys.some((key) => window.localStorage.getItem(key) !== null)
-  })
   const [theme, setTheme] = useState(() => {
     const stored = window.localStorage.getItem('pdf-king-theme')
-    return normalizeTheme(stored)
+    const auto = window.localStorage.getItem('pdf-king-auto-theme') !== 'false'
+    const dark = normalizeTheme(window.localStorage.getItem('pdf-king-dark'), 'violet-dark')
+    const light = normalizeTheme(window.localStorage.getItem('pdf-king-light'), 'violet-light')
+    if (!auto && stored) return normalizeTheme(stored)
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? dark : light
   })
   const [logoTheme, setLogoTheme] = useState(theme)
   const [autoTheme, setAutoTheme] = useState(() => {
     const v = window.localStorage.getItem('pdf-king-auto-theme')
-    return v === 'true'
+    return v !== 'false'
   })
   const [selectedDarkTheme, setSelectedDarkTheme] = useState(() => {
     return normalizeTheme(window.localStorage.getItem('pdf-king-dark'), 'violet-dark')
@@ -185,8 +184,20 @@ function App() {
   const [selectedLightTheme, setSelectedLightTheme] = useState(() => {
     return normalizeTheme(window.localStorage.getItem('pdf-king-light'), 'violet-light')
   })
-  const [userName, setUserName] = useState(() => window.localStorage.getItem('pdfking-user-name') || 'User')
-  const [userAvatar, setUserAvatar] = useState(() => window.localStorage.getItem('pdfking-user-avatar') || null)
+
+  useEffect(() => {
+    window.localStorage.removeItem('pdfking-user-name')
+    window.localStorage.removeItem('pdfking-onboarding-complete')
+    const syncStorage = (event) => {
+      if (event.key === 'pdf-king-theme') setTheme(normalizeTheme(event.newValue))
+      if (event.key === 'pdf-king-dark') setSelectedDarkTheme(normalizeTheme(event.newValue, 'violet-dark'))
+      if (event.key === 'pdf-king-light') setSelectedLightTheme(normalizeTheme(event.newValue, 'violet-light'))
+      if (event.key === 'pdf-king-auto-theme') setAutoTheme(event.newValue === 'true')
+      if (event.key === 'pdfking-command-palette-size') setCommandPaletteSize(event.newValue === 'maximized' ? 'maximized' : 'compact')
+    }
+    window.addEventListener('storage', syncStorage)
+    return () => window.removeEventListener('storage', syncStorage)
+  }, [])
 
   useEffect(() => {
     if (!window.pdfKing?.onUpdateState) return undefined
@@ -210,26 +221,6 @@ function App() {
     void window.pdfKing?.downloadUpdate?.().catch((error) => setUpdateInfo((current) => current ? { ...current, status: 'error', message: error?.message } : current))
   }, [updateInfo])
 
-  useEffect(() => {
-    const syncStorage = (event) => {
-      if (event.key === 'pdf-king-theme') setTheme(normalizeTheme(event.newValue))
-      if (event.key === 'pdf-king-dark') setSelectedDarkTheme(normalizeTheme(event.newValue, 'violet-dark'))
-      if (event.key === 'pdf-king-light') setSelectedLightTheme(normalizeTheme(event.newValue, 'violet-light'))
-      if (event.key === 'pdf-king-auto-theme') setAutoTheme(event.newValue === 'true')
-      if (event.key === 'pdfking-user-name') setUserName(event.newValue || 'User')
-      if (event.key === 'pdfking-user-avatar') setUserAvatar(event.newValue || null)
-      if (event.key === 'pdfking-command-palette-size') setCommandPaletteSize(event.newValue === 'maximized' ? 'maximized' : 'compact')
-      if (event.key === 'pdfking-onboarding-complete' && event.newValue === 'true') setShowOnboarding(false)
-    }
-    window.addEventListener('storage', syncStorage)
-    return () => window.removeEventListener('storage', syncStorage)
-  }, [])
-
-  const handleSetUserName = (name) => { setUserName(name); window.localStorage.setItem('pdfking-user-name', name) }
-  const handleSetAvatar = (avatar) => {
-    try { window.localStorage.setItem('pdfking-user-avatar', avatar); setUserAvatar(avatar) }
-    catch { throw new Error('The profile photo could not be saved because local storage is full. Remove some browser data and try again.') }
-  }
 
   const reportTabDirty = (tabId, isDirty) => {
     const next = new Set(dirtyTabIdsRef.current)
@@ -270,9 +261,13 @@ function App() {
     return false
   }
 
-  useEffect(() => window.pdfKing?.onRequestClose?.(() => {
-    const guardNext = () => { const tabId = [...dirtyTabIdsRef.current][0]; if(tabId === undefined) window.pdfKing?.allowCloseWindow?.(); else requestLeave(tabId, guardNext, {windowClose:true}) }; guardNext()
-  }), [])
+  useEffect(() => {
+    const unsubscribe = window.pdfKing?.onRequestClose?.(() => {
+      const guardNext = () => { const tabId = [...dirtyTabIdsRef.current][0]; if(tabId === undefined) window.pdfKing?.allowCloseWindow?.(); else requestLeave(tabId, guardNext, {windowClose:true}) }; guardNext()
+    })
+    void window.pdfKing?.markRendererReady?.()
+    return unsubscribe
+  }, [])
 
   const cancelLeaveRequest = () => {
     if (!leaveRequest) return
@@ -594,7 +589,7 @@ function App() {
   }
 
   const handleWorkspaceContextMenu = (event) => {
-    if (isSearchOpen || isNewDocumentOpen || showOnboarding) return
+    if (isSearchOpen || isNewDocumentOpen) return
     const nativeTarget = event.target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
     if (nativeTarget) return
     const target = event.target
@@ -729,41 +724,16 @@ function App() {
     }
     document.addEventListener('keydown', trap, true)
     return () => { observer.disconnect(); document.removeEventListener('keydown', trap, true); document.removeEventListener('focusin', captureReturnFocus, true) }
-  }, [isSearchOpen, isNewDocumentOpen, showOnboarding, leaveRequest])
+  }, [isSearchOpen, isNewDocumentOpen, leaveRequest])
 
   const handleSelectTheme = (nextTheme) => {
     if (!ALL_THEME_IDS.includes(nextTheme)) return
     setTheme(nextTheme)
-    if (!showOnboarding) window.localStorage.setItem('pdf-king-theme', nextTheme)
+    window.localStorage.setItem('pdf-king-theme', nextTheme)
   }
 
   const handleToggleTheme = () => {
     handleSelectTheme(pairedTheme(theme))
-  }
-
-  const handleFinishOnboarding = ({ name, theme: chosenTheme, matchSystem, keepRecent }) => {
-    const displayName = name.trim() || 'User'
-    const darkTheme = isLightTheme(chosenTheme) ? pairedTheme(chosenTheme) : chosenTheme
-    const lightTheme = pairedTheme(darkTheme)
-
-    handleSetUserName(displayName)
-    setSelectedDarkTheme(darkTheme)
-    setSelectedLightTheme(lightTheme)
-    setAutoTheme(matchSystem)
-    window.localStorage.setItem('pdf-king-theme', chosenTheme)
-    window.localStorage.setItem('pdf-king-dark', darkTheme)
-    window.localStorage.setItem('pdf-king-light', lightTheme)
-    window.localStorage.setItem('pdf-king-auto-theme', String(matchSystem))
-    window.localStorage.setItem('pdfking-keep-recent', String(keepRecent))
-    window.localStorage.setItem('pdfking-onboarding-complete', 'true')
-    if (matchSystem) {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? darkTheme : lightTheme
-      setTheme(systemTheme)
-      window.localStorage.setItem('pdf-king-theme', systemTheme)
-    } else {
-      setTheme(chosenTheme)
-    }
-    setShowOnboarding(false)
   }
 
   useEffect(() => {
@@ -872,7 +842,7 @@ function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentView, activeTabId, isNewDocumentOpen, isSearchOpen, contextMenu, tabs, showOnboarding, theme])
+  }, [currentView, activeTabId, isNewDocumentOpen, isSearchOpen, contextMenu, tabs, theme])
 
   return (
     <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${phoneLayout ? 'phone-layout' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible && !phoneLayout ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
@@ -881,7 +851,7 @@ function App() {
       <div className="tabs-spacer" style={{ height: '8px', background: 'transparent' }} />
       <div className="workspace-shell">
         {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
-        <Sidebar currentView={currentView} onNavigate={handleNavigate} onOpenNewDocument={handleOpenNewDocument} onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)} collapsed={sidebarCollapsed} theme={theme} userName={userName} phoneLayout={phoneLayout} onCloseMobileNav={() => setMobileNavOpen(false)} />
+        <Sidebar currentView={currentView} onNavigate={handleNavigate} onOpenNewDocument={handleOpenNewDocument} onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)} collapsed={sidebarCollapsed} theme={theme} phoneLayout={phoneLayout} onCloseMobileNav={() => setMobileNavOpen(false)} />
 
       <main className="main-area" id={`workspace-panel-${activeTabId}`} tabIndex={-1} role="tabpanel" aria-labelledby={`workspace-tab-${activeTabId}`} onContextMenu={handleWorkspaceContextMenu}>
         <Topbar
@@ -894,7 +864,7 @@ function App() {
         />
 
         {currentView.type === 'home' && (
-          <HomePage userName={userName} theme={theme} onNavigate={handleNavigate} onOpenPdf={handleOpenPdf} />
+          <HomePage theme={theme} onNavigate={handleNavigate} onOpenPdf={handleOpenPdf} />
         )}
 
         {currentView.type === 'category' && (
@@ -905,10 +875,10 @@ function App() {
           />
         )}
 
-        {isFullPdfEditor && <PdfEditorWorkspace key={activeTabId} editorRef={editorRef} initialDraft={editorDrafts[activeTabId]} onDraftChange={saveActiveEditorDraft} onDirtyChange={(dirty) => reportTabDirty(activeTabId, dirty)} onBeforeDiscard={(action) => requestLeave(activeTabId, action)} initialFiles={currentView.files || EMPTY_FILES} openPicker={currentView.openPicker || false} initialTool={currentView.toolId} onExit={() => handleNavigate({ type: 'home' })} onOpenPdf={handleOpenPdf} appChromeVisible={editorChromeVisible} onToggleAppChrome={() => setEditorChromeVisible((visible) => !visible)} editTextRequest={editTextRequest} />}
+        {isFullPdfEditor && <Suspense fallback={null}><PdfEditorWorkspace key={activeTabId} editorRef={editorRef} initialDraft={editorDrafts[activeTabId]} onDraftChange={saveActiveEditorDraft} onDirtyChange={(dirty) => reportTabDirty(activeTabId, dirty)} onBeforeDiscard={(action) => requestLeave(activeTabId, action)} initialFiles={currentView.files || EMPTY_FILES} openPicker={currentView.openPicker || false} initialTool={currentView.toolId} onExit={() => handleNavigate({ type: 'home' })} onOpenPdf={handleOpenPdf} appChromeVisible={editorChromeVisible} onToggleAppChrome={() => setEditorChromeVisible((visible) => !visible)} editTextRequest={editTextRequest} /></Suspense>}
 
         {currentView.type === 'tool' && !isFullPdfEditor && (
-          <ToolStudioPage
+          <Suspense fallback={null}><ToolStudioPage
             key={`${activeTabId}-${currentView.toolId}`}
             toolId={currentView.toolId}
             initialFiles={currentView.files || EMPTY_FILES}
@@ -921,7 +891,7 @@ function App() {
             editorRef={editorRef}
             onDirtyChange={(dirty) => reportTabDirty(activeTabId, dirty)}
             onBeforeDiscard={(action) => requestLeave(activeTabId, action)}
-          />
+          /></Suspense>
         )}
 
         {currentView.type === 'recent' && (
@@ -939,10 +909,6 @@ function App() {
           selectedLightTheme={selectedLightTheme}
           onSelectDarkTheme={(t) => { setSelectedDarkTheme(t); window.localStorage.setItem('pdf-king-dark', t); if (autoTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(t); }}
           onSelectLightTheme={(t) => { setSelectedLightTheme(t); window.localStorage.setItem('pdf-king-light', t); if (autoTheme && !window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(t); }}
-          userName={userName}
-          userAvatar={userAvatar}
-          onSetUserName={handleSetUserName}
-          onSetAvatar={handleSetAvatar}
           commandPaletteSize={commandPaletteSize}
           onSetCommandPaletteSize={(size) => { setCommandPaletteSize(size); window.localStorage.setItem('pdfking-command-palette-size', size) }}
         />
@@ -968,7 +934,6 @@ function App() {
         onNewTab={createTab}
         size={commandPaletteSize}
       />
-      <Onboarding isOpen={showOnboarding} theme={theme} onSelectTheme={handleSelectTheme} onFinish={handleFinishOnboarding} />
       <PasswordDialog />
       {leaveRequest && <UnsavedChangesDialog stage={leaveRequest.stage} error={leaveError} onDismiss={() => {setLeaveRequest(null); setLeaveError(''); window.pdfKing?.cancelCloseWindow?.()}} onAccept={() => resolveLeaveRequest()} onCancel={cancelLeaveRequest} />}
       {updateInfo && <UpdateDialog update={updateInfo} onSkip={skipUpdate} onUpdate={startUpdate} />}

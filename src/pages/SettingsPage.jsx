@@ -39,14 +39,6 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
     ['editor-zoom-out', 'Zoom out'],
     ['editor-zoom-reset', 'Reset zoom']
   ]
-  const repeatActions = new Set(['search', 'open-file'])
-
-  const setToggleOnRepeat = (key, enabled) => {
-    const updated = { ...shortcuts, [key]: { ...shortcuts[key], toggleOnRepeat: enabled } }
-    setShortcuts(updated)
-    saveShortcuts(updated)
-  }
-
   useEffect(() => {
     const handle = (e) => {
       if (!recording) return
@@ -132,7 +124,6 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
               <span className="shortcut-saved" aria-live="polite">{savedAction === key ? 'Saved' : ''}</span>
             </span>
           </button>
-          {repeatActions.has(key) && <label className="shortcut-repeat-toggle"><input type="checkbox" checked={shortcuts[key]?.toggleOnRepeat !== false} onChange={(event) => setToggleOnRepeat(key, event.target.checked)} /><span>Press again to close</span></label>}
           {showAll && shortcuts[key]?.key && <button type="button" className="shortcut-clear" onClick={() => clearShortcut(key)} aria-label={`Clear shortcut for ${label}`}>Clear</button>}
         </div>
       ))}
@@ -144,7 +135,7 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
   )
 }
 
-export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onToggleAutoTheme, selectedDarkTheme, selectedLightTheme, onSelectDarkTheme, onSelectLightTheme, userName = 'User', userAvatar, onSetUserName, onSetAvatar, commandPaletteSize = 'compact', onSetCommandPaletteSize }) {
+export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onToggleAutoTheme, selectedDarkTheme, selectedLightTheme, onSelectDarkTheme, onSelectLightTheme, commandPaletteSize = 'compact', onSetCommandPaletteSize }) {
   const activeTheme = THEMES.find((option) => theme === option.light || theme === option.dark)
   const activeVariant = theme.endsWith('-light') ? 'Light' : 'Dark'
   const [activeSection, setActiveSection] = useState('appearance')
@@ -157,10 +148,6 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
   const [localFonts, setLocalFonts] = useState([])
   const [fontMessage, setFontMessage] = useState('')
   const fontPicker = useRef(null)
-  const [editingName, setEditingName] = useState(false)
-  const [draftName, setDraftName] = useState(userName)
-  const avatarPicker = useRef(null)
-  const nameInput = useRef(null)
   const hasNativeOutputFolder = Boolean(window.pdfKing?.chooseOutputFolder)
 
   useEffect(() => {
@@ -225,36 +212,6 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
     } catch (cause) { setSettingsError(cause.message || 'Could not choose an export folder.') }
   }
 
-  const beginNameEdit = () => {
-    setDraftName(userName)
-    setEditingName(true)
-    requestAnimationFrame(() => nameInput.current?.focus())
-  }
-
-  const saveName = () => {
-    const nextName = draftName.trim()
-    if (nextName && onSetUserName) onSetUserName(nextName)
-    setEditingName(false)
-  }
-
-  const chooseAvatar = (event) => {
-    const file = event.target.files?.[0]
-    if (!file || !onSetAvatar) return
-    event.target.value = ''
-    if (!file.type.startsWith('image/')) { setSettingsError('Choose an image file for your profile photo.'); return }
-    if (file.size > 20 * 1024 * 1024) { setSettingsError('Choose an image smaller than 20 MB.'); return }
-    createImageBitmap(file).then((bitmap) => {
-      const canvas = document.createElement('canvas')
-      const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height))
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-      bitmap.close()
-      onSetAvatar(canvas.toDataURL('image/jpeg', 0.86))
-      setSettingsError('')
-    }).catch(() => setSettingsError('Could not read this image. Choose another photo.'))
-  }
-
   const selectThemeVariant = (themeId, mode) => {
     if (autoTheme) {
       if (mode === 'light') onSelectLightTheme?.(themeId)
@@ -302,19 +259,6 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
       </div>
 
       <div className="settings-sections" id={`settings-panel-${activeSection}`} role="tabpanel" aria-labelledby={`settings-tab-${activeSection}`}>
-        {activeSection === 'general' && <div className="settings-card">
-          <div className="settings-card-header"><span className="tool-icon lilac"><Icon name="user" size={18} /></span><div><strong>Profile</strong><small>Personalize your workspace</small></div></div>
-          <div className="settings-card-body settings-profile-body">
-            <button className="greeting-avatar" type="button" onClick={() => avatarPicker.current?.click()} aria-label="Change profile picture" title="Change profile picture">
-              {userAvatar ? <img src={userAvatar} alt="" /> : <span><Icon name="user" size={24} /></span>}
-              <span className="greeting-avatar-edit"><Icon name="edit" size={12} /></span>
-            </button>
-            {editingName ? <input ref={nameInput} className="greeting-name-input" aria-label="Edit your name" value={draftName} onChange={(event) => setDraftName(event.target.value)} onBlur={saveName} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveName() } if (event.key === 'Escape') { setDraftName(userName); setEditingName(false) } }} /> : <div className="settings-profile-name"><strong>{userName}</strong><small>Local profile</small></div>}
-            {!editingName && <button className="ghost-button" type="button" onClick={beginNameEdit}><Icon name="edit" size={14} />Edit name</button>}
-            <input ref={avatarPicker} className="avatar-file-input" type="file" accept="image/*" aria-label="Choose a profile picture" onChange={chooseAvatar} />
-          </div>
-        </div>}
-
         {activeSection === 'general' && <div className="settings-card">
           <div className="settings-card-header">
             <span className="tool-icon blue"><Icon name="type" size={18} /></span>
