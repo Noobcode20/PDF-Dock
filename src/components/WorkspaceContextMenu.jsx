@@ -33,7 +33,7 @@ export function WorkspaceContextMenu({ menu, onClose, onAction }) {
   return <Presence present={!!menu} exitDuration={120}><div ref={menuRef} className="workspace-context-menu" role="menu" style={{ left: visibleMenu?.x, top: visibleMenu?.y }}>
     {visibleMenu?.items.map((item, index) => item.separator
       ? <div className="workspace-context-separator" role="separator" key={`sep-${index}`} />
-      : <button type="button" role="menuitem" key={item.id} autoFocus={index === visibleMenu.items.findIndex((menuItem) => !menuItem.separator)} onClick={() => onAction(item)}>
+      : <button type="button" role="menuitem" className={item.id === 'report-bug' ? 'context-menu-report-bug' : ''} key={item.id} autoFocus={index === visibleMenu.items.findIndex((menuItem) => !menuItem.separator)} onClick={() => onAction(item)}>
         {item.icon && <Icon name={item.icon} size={15} />}<span>{item.label}</span>
         {item.shortcut && <small>{item.shortcut}</small>}
       </button>)}

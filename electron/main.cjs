@@ -1,11 +1,102 @@
 const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, Menu } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
 const os = require('node:os')
+
+const githubTokenFile = () => path.join(app.getPath('userData'), 'github-feedback-token.enc')
+const githubAuthSessions = new Map()
+
+async function readGithubToken() {
+  if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
+  const encrypted = await fs.readFile(githubTokenFile())
+  const decrypted = await safeStorage.decryptStringAsync(encrypted)
+  if (decrypted.shouldReEncrypt) await atomicWrite(githubTokenFile(), await safeStorage.encryptStringAsync(decrypted.result))
+  return decrypted.result
+}
+
+async function githubRequest(url, token, options = {}) {
+  const response = await fetch(url, { ...options, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', ...(options.headers || {}) } })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.message || `GitHub request failed (HTTP ${response.status}).`)
+  return payload
+}
+
+ipcMain.handle('pdfking:github-start-device-auth', async (_event, clientId) => {
+  if (typeof clientId !== 'string' || !/^[A-Za-z0-9]{20}$/.test(clientId)) throw new Error('The GitHub OAuth app client ID is invalid.')
+  if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
+  const response = await fetch('https://github.com/login/device/code', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: clientId, scope: 'public_repo' }) })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || !payload.device_code || !payload.user_code) throw new Error(payload.error_description || 'GitHub device authorization could not start.')
+  const sessionId = crypto.randomUUID()
+  githubAuthSessions.set(sessionId, { clientId, deviceCode: payload.device_code, interval: Math.max(Number(payload.interval) || 5, 5), expiresAt: Date.now() + (Number(payload.expires_in) || 900) * 1000 })
+  return { sessionId, userCode: payload.user_code, verificationUri: payload.verification_uri, interval: Math.max(Number(payload.interval) || 5, 5), expiresIn: Number(payload.expires_in) || 900 }
+})
+
+ipcMain.handle('pdfking:github-poll-device-auth', async (_event, sessionId) => {
+  const session = githubAuthSessions.get(sessionId)
+  if (!session) throw new Error('GitHub authorization session has expired. Start again to get a new code.')
+  if (Date.now() >= session.expiresAt) { githubAuthSessions.delete(sessionId); throw new Error('GitHub authorization expired. Start again to get a new code.') }
+  const response = await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: session.clientId, device_code: session.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }) })
+  const payload = await response.json().catch(() => ({}))
+  if (payload.error === 'authorization_pending') return { status: 'pending', interval: session.interval }
+  if (payload.error === 'slow_down') { session.interval += 5; return { status: 'pending', interval: session.interval } }
+  if (!response.ok || !payload.access_token) { githubAuthSessions.delete(sessionId); throw new Error(payload.error_description || payload.error || 'GitHub authorization failed.') }
+  githubAuthSessions.delete(sessionId)
+  if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
+  await fs.mkdir(app.getPath('userData'), { recursive: true })
+  await atomicWrite(githubTokenFile(), await safeStorage.encryptStringAsync(payload.access_token))
+  const user = await githubRequest('https://api.github.com/user', payload.access_token)
+  return { status: 'connected', account: { login: user.login, url: user.html_url } }
+})
+
+ipcMain.handle('pdfking:github-get-account', async () => {
+  try {
+    const token = await readGithubToken()
+    const user = await githubRequest('https://api.github.com/user', token)
+    return { login: user.login, url: user.html_url }
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    if (/Bad credentials|token expired|401/i.test(error.message)) await fs.rm(githubTokenFile(), { force: true }).catch(() => {})
+    throw error
+  }
+})
+
+ipcMain.handle('pdfking:github-clear-token', async () => { await fs.rm(githubTokenFile(), { force: true }); return true })
+
+ipcMain.handle('pdfking:github-create-issue', async (_event, payload) => {
+  const repository = String(payload?.repository || '')
+  const title = String(payload?.title || '').trim()
+  const body = String(payload?.body || '').trim()
+  if (repository !== 'Noobcode20/PDF-Dock') throw new Error('The configured GitHub repository is invalid.')
+  if (title.length < 4 || title.length > 256 || body.length < 10 || body.length > 60000) throw new Error('Add a valid issue title and description.')
+  const token = await readGithubToken()
+  const issue = await githubRequest(`https://api.github.com/repos/${repository}/issues`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body }) })
+  return { ok: true, url: issue.html_url, number: issue.number }
+})
+
+ipcMain.handle('pdfking:github-create-proxy-issue', async (_event, proxyUrl, payload) => {
+  try {
+    const endpoint = new URL(String(proxyUrl || ''))
+    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) throw new Error('The bug reporting service URL is invalid. Update the app configuration and rebuild.')
+    const response = await fetch(endpoint.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result.url) throw new Error(result.error || `GitHub could not create the issue (HTTP ${response.status}).`)
+    return result
+  } catch (error) {
+    if (error?.message === 'Failed to fetch' || error?.name === 'TypeError') {
+      throw new Error('Could not connect to the bug reporting service. Check your internet connection and try again.')
+    }
+    throw error
+  }
+})
 
 const recentDirectory = () => path.join(app.getPath('userData'), 'recent-files')
 const recentIndex = () => path.join(recentDirectory(), 'index.json')
@@ -453,6 +544,30 @@ function createWindow() {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('did-finish-load', () => {
     if (currentUpdateState && !window.isDestroyed()) window.webContents.send('pdfking:update-state', currentUpdateState)
+  })
+  window.webContents.on('context-menu', (event, params) => {
+    // The renderer owns the normal workspace context menu. Keep Electron's native
+    // editing menu for text inputs and selections so its Report a bug item stays available.
+    if (!params.isEditable && !params.selectionText) return
+    event.preventDefault()
+    const template = []
+    if (params.isEditable) {
+      const editFlags = params.editFlags || {}
+      template.push(
+        { role: 'undo', enabled: !!editFlags.canUndo },
+        { role: 'redo', enabled: !!editFlags.canRedo },
+        { type: 'separator' },
+        { role: 'cut', enabled: !!editFlags.canCut },
+        { role: 'copy', enabled: !!editFlags.canCopy },
+        { role: 'paste', enabled: !!editFlags.canPaste },
+        { role: 'selectAll', enabled: !!editFlags.canSelectAll },
+        { type: 'separator' },
+      )
+    } else if (params.selectionText) {
+      template.push({ role: 'copy', enabled: !!params.editFlags?.canCopy }, { type: 'separator' })
+    }
+    template.push({ label: 'Report a bug', click: () => window.webContents.send('pdfking:request-bug-report', { context: params.isEditable ? 'Text field' : 'Selected text' }) })
+    Menu.buildFromTemplate(template).popup({ window })
   })
   window.webContents.on('will-navigate', (event, target) => {
     if (!isAppRendererURL(target, app.getAppPath())) event.preventDefault()

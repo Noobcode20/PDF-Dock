@@ -50,6 +50,7 @@ export const paths = {
   type: <><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></>,
   cursor: <path d="M5 3v17l4.4-4.2 3.1 5.2 2.3-1.3-3.1-5.2H18L5 3Z"/>,
   layers: <><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>,
+  bug: <><path d="M9 8V5a3 3 0 0 1 6 0v3"/><path d="M5 11h14M7 11v5a5 5 0 0 0 10 0v-5"/><path d="M5 10 3 8m16 2 2-2M6 16H3m18 0h-3M9 5 7 3m8 2 2-2"/></>,
   comment: <><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.7 8.7 0 0 1-4-.9L4 20l1.1-3.5A7.2 7.2 0 0 1 4 12c0-4.1 3.6-7.5 8-7.5s8 3.1 8 7Z"/><path d="M8 11h8M8 14h5"/></>,
   print: <><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></>,
   save: <><path d="M5 3h12l4 4v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h1Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></>,
