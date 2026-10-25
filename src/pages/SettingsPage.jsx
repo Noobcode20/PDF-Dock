@@ -4,6 +4,7 @@ import { THEMES, isLightTheme } from '../themes'
 import { DEFAULT_SHORTCUTS, loadShortcuts, saveShortcuts } from '../keyboardShortcuts'
 import { listLocalFonts, readFontFamilyName, removeLocalFont, saveLocalFont } from '../editor/localFonts'
 import { recentFilesBackend } from '../recentFiles'
+import { FeedbackSettings } from '../components/FeedbackSettings'
 
 function InteractiveShortcuts({ showAll, setShowAll }) {
   const [shortcuts, setShortcuts] = useState(loadShortcuts())
@@ -254,11 +255,13 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
         {[
           ['appearance', 'Appearance', 'sun'],
           ['general', 'General', 'sliders'],
+          ['feedback', 'Bugs & Requests', 'comment'],
           ['shortcuts', 'Shortcuts', 'keyboard'],
         ].map(([id, label, icon]) => <button key={id} type="button" role="tab" id={`settings-tab-${id}`} aria-selected={activeSection === id} aria-controls={`settings-panel-${id}`} className={activeSection === id ? 'active' : ''} onClick={() => setActiveSection(id)}><Icon name={icon} size={14} />{label}</button>)}
       </div>
 
       <div className="settings-sections" id={`settings-panel-${activeSection}`} role="tabpanel" aria-labelledby={`settings-tab-${activeSection}`}>
+        {activeSection === 'feedback' && <FeedbackSettings />}
         {activeSection === 'general' && <div className="settings-card">
           <div className="settings-card-header">
             <span className="tool-icon blue"><Icon name="type" size={18} /></span>

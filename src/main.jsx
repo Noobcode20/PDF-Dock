@@ -39,6 +39,7 @@ import { NewDocumentPage } from './pages/NewDocumentPage'
 import { RecentFilesPage } from './pages/RecentFilesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { WorkspaceContextMenu } from './components/WorkspaceContextMenu'
+import { BugReportDialog } from './components/BugReportDialog'
 import { ALL_THEME_IDS, DEFAULT_THEME, isLightTheme, normalizeTheme, pairedTheme, themeBrandAccent } from './themes'
 import { allTools, categories } from './toolsData'
 import { loadShortcuts } from './keyboardShortcuts'
@@ -163,6 +164,7 @@ function App() {
   const [newDocumentMode, setNewDocumentMode] = useState('new')
   const [commandPaletteSize, setCommandPaletteSize] = useState(() => window.localStorage.getItem('pdfking-command-palette-size') === 'maximized' ? 'maximized' : 'compact')
   const [contextMenu, setContextMenu] = useState(null)
+  const [bugReportContext, setBugReportContext] = useState(null)
   const [actionError, setActionError] = useState('')
   const [updateInfo, setUpdateInfo] = useState(null)
   const [theme, setTheme] = useState(() => {
@@ -589,10 +591,9 @@ function App() {
   }
 
   const handleWorkspaceContextMenu = (event) => {
-    if (isSearchOpen || isNewDocumentOpen) return
-    const nativeTarget = event.target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
-    if (nativeTarget) return
     const target = event.target
+    const nativeTarget = target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+    if (nativeTarget && window.pdfKing?.platform && window.pdfKing.platform !== 'web') return
     const pdfPage = target.closest('.acrobat-document-page')
     const fileRow = target.closest('[data-pdf-id]')
     const themeChoice = target.closest('.theme-choice[data-theme]')
@@ -641,13 +642,27 @@ function App() {
       const currentTool = allTools.find((tool) => tool.id === currentView.toolId)
       items = [{ id: 'open-pdf', label: 'Choose a PDF…', icon: 'upload', type: 'open' }, ...(currentTool ? [{ id: 'repeat-tool', label: `Restart ${currentTool.name}`, icon: 'redo', type: 'tool', toolId: currentTool.id }] : [])]
     }
-    if (!items.length) return
+    const viewLabel = currentView.type === 'tool'
+      ? (allTools.find((tool) => tool.id === currentView.toolId)?.name || 'Tool')
+      : ({ home: 'Home', recent: 'Recent files', settings: 'Settings', category: 'Tools' }[currentView.type] || 'Workspace')
+    const page = target.closest('.acrobat-document-page')
+    const surface = page ? `PDF page ${page.dataset.pageNumber || ''}`.trim()
+      : target.closest('.sidebar') ? 'Sidebar'
+        : target.closest('.tabs-bar') ? 'Workspace tabs'
+          : target.closest('.topbar') ? 'Top bar'
+            : target.closest('.settings-page, .settings-redesign') ? 'Settings panel'
+              : target.closest('.tool-card') ? 'Tool list'
+                : target.closest('[data-pdf-id]') ? 'Recent file item'
+                  : 'Workspace'
+    if (items.length && !items.at(-1)?.separator) items.push({ separator: true })
+    items.push({ id: 'report-bug', label: 'Report a bug', icon: 'bug', type: 'report-bug', context: `${viewLabel} · ${surface}` })
     setContextMenu({ x: Math.min(event.clientX, window.innerWidth - 290), y: Math.min(event.clientY, window.innerHeight - Math.min(items.length * 38, 430)), items })
   }
 
   const handleContextAction = async (item) => {
     setContextMenu(null)
     setActionError('')
+    if (item.type === 'report-bug') { setBugReportContext(item.context); return }
     if (item.type === 'edit-text') { setEditTextRequest((request) => request + 1); return }
     if (item.type === 'editor-tool') { editorRef.current?.activateTool?.(item.toolId); return }
     if (item.type === 'theme') { handleSelectTheme(item.themeId); return }
@@ -674,6 +689,13 @@ function App() {
     else if (item.type === 'tool-card') item.element?.click()
     else if (item.type === 'tool') handlePaletteNavigate({ type: 'tool', toolId: item.toolId || item.id, files })
   }
+
+  useEffect(() => window.pdfKing?.onRequestBugReport?.((payload) => {
+    const viewLabel = currentView.type === 'tool'
+      ? (allTools.find((tool) => tool.id === currentView.toolId)?.name || 'Tool')
+      : ({ home: 'Home', recent: 'Recent files', settings: 'Settings', category: 'Tools' }[currentView.type] || 'Workspace')
+    setBugReportContext(`${viewLabel} · ${payload?.context || 'Text field or selected text'}`)
+  }), [currentView])
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -845,7 +867,7 @@ function App() {
   }, [currentView, activeTabId, isNewDocumentOpen, isSearchOpen, contextMenu, tabs, theme])
 
   return (
-    <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${phoneLayout ? 'phone-layout' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible && !phoneLayout ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
+    <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${phoneLayout ? 'phone-layout' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible && !phoneLayout ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} onContextMenu={handleWorkspaceContextMenu} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
       <a className="skip-link" href={`#workspace-panel-${activeTabId}`}>Skip to workspace</a>
       <TabBar tabs={tabs} activeTabId={activeTabId} dirtyTabIds={dirtyTabIds} onSelectTab={selectTab} onCloseTab={closeTab} onNewTab={createTab} getTitle={getTabTitle} onStartTabDrag={startTabDrag} onCancelTabDrag={cancelTabDrag} onReorderTab={reorderTab} onImportTab={importTabFromWindow} />
       <div className="tabs-spacer" style={{ height: '8px', background: 'transparent' }} />
@@ -853,7 +875,7 @@ function App() {
         {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
         <Sidebar currentView={currentView} onNavigate={handleNavigate} onOpenNewDocument={handleOpenNewDocument} onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)} collapsed={sidebarCollapsed} theme={theme} phoneLayout={phoneLayout} onCloseMobileNav={() => setMobileNavOpen(false)} />
 
-      <main className="main-area" id={`workspace-panel-${activeTabId}`} tabIndex={-1} role="tabpanel" aria-labelledby={`workspace-tab-${activeTabId}`} onContextMenu={handleWorkspaceContextMenu}>
+      <main className="main-area" id={`workspace-panel-${activeTabId}`} tabIndex={-1} role="tabpanel" aria-labelledby={`workspace-tab-${activeTabId}`}>
         <Topbar
           currentView={currentView}
           onNavigate={handlePaletteNavigate}
@@ -917,6 +939,7 @@ function App() {
       </div>
 
       <WorkspaceContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAction={handleContextAction} />
+      {bugReportContext && <BugReportDialog context={bugReportContext} onClose={() => setBugReportContext(null)} />}
       {actionError && <div className="app-action-error" role="alert"><span>{actionError}</span><button type="button" onClick={() => setActionError('')} aria-label="Dismiss error">×</button></div>}
 
       <NewDocumentPage isOpen={isNewDocumentOpen} mode={newDocumentMode} onNavigate={handleNavigate} onClose={() => setIsNewDocumentOpen(false)} />

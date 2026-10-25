@@ -34,6 +34,17 @@ contextBridge.exposeInMainWorld('pdfKing', {
     ipcRenderer.on('pdfking:request-close', listener)
     return () => ipcRenderer.removeListener('pdfking:request-close', listener)
   },
+  githubGetAccount: () => ipcRenderer.invoke('pdfking:github-get-account'),
+  githubClearToken: () => ipcRenderer.invoke('pdfking:github-clear-token'),
+  githubCreateIssue: (payload) => ipcRenderer.invoke('pdfking:github-create-issue', payload),
+  githubCreateProxyIssue: (proxyUrl, payload) => ipcRenderer.invoke('pdfking:github-create-proxy-issue', proxyUrl, payload),
+  githubStartDeviceAuth: (clientId) => ipcRenderer.invoke('pdfking:github-start-device-auth', clientId),
+  githubPollDeviceAuth: (sessionId) => ipcRenderer.invoke('pdfking:github-poll-device-auth', sessionId),
+  onRequestBugReport: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('pdfking:request-bug-report', listener)
+    return () => ipcRenderer.removeListener('pdfking:request-bug-report', listener)
+  },
   readQpdfWasm: (assetName) => ipcRenderer.invoke('pdfking:read-qpdf-wasm', assetName),
   convertType1Fonts: (data) => ipcRenderer.invoke('pdfking:convert-type1-fonts', data),
   readSystemFont: (face) => ipcRenderer.invoke('pdfking:read-system-font', face),

@@ -1,6 +1,6 @@
 {
   "name": "pdf-dock-desktop",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "private": true,
   "productName": "PDF Dock",
   "description": "A clean desktop PDF workspace.",
