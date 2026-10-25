@@ -9,9 +9,9 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http://127.0.0.1:5174 && node scripts/launch-electron.cjs\"",
     "build": "vite build",
     "check": "npm run build",
-    "package:mac": "npm run build && electron-builder --mac --x64 --arm64 --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64 --publish never",
     "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs",
+    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs && node scripts/test-updater.mjs && node scripts/test-render-budget.mjs",
     "test:repairs": "node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs"
   },
   "dependencies": {
@@ -26,7 +26,7 @@
     "@pdf-lib/fontkit": "^1.1.1",
     "docx": "^9.8.1",
     "docx-preview": "0.4.1",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.8.11",
     "jszip": "^3.10.2",
     "mammoth": "^1.13.0",
     "pdf-lib": "^1.17.1",
@@ -53,8 +53,8 @@
         "provider": "github",
         "owner": "Noobcode20",
         "repo": "PDF-Dock",
-        "channel": "beta",
-        "releaseType": "prerelease"
+        "releaseType": "prerelease",
+        "channel": "beta"
       }
     ],
     "appId": "com.pdfdock.app",
@@ -107,7 +107,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
-    }
+    },
+    "detectUpdateChannel": true
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

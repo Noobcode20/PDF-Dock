@@ -20,13 +20,16 @@ jobs:
             runner: macos-latest
             script: package:mac
             asset: |
-              release/PDF-Dock-macOS-*
+              release/*.dmg
+              release/*.zip
+              release/*.blockmap
               release/beta-mac.yml
           - platform: Windows
             runner: windows-latest
             script: package:win
             asset: |
-              release/PDF-Dock-Windows.*
+              release/*.exe
+              release/*.blockmap
               release/beta.yml
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +42,7 @@ jobs:
         env:
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           VITE_GITHUB_ISSUE_PROXY_URL: ${{ vars.VITE_GITHUB_ISSUE_PROXY_URL }}
+      - run: node -e "require('node:fs').rmSync('release/builder-debug.yml', { force: true })"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-installer

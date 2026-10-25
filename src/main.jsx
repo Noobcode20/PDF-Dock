@@ -1,4 +1,3 @@
-import { PasswordDialog } from './editor/PasswordDialog'
 import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource/outfit/latin-400.css'
@@ -27,19 +26,21 @@ import '@fontsource/nunito-sans/latin-500.css'
 import '@fontsource/nunito-sans/latin-600.css'
 import '@fontsource/nunito-sans/latin-700.css'
 import './styles.css'
-import { Sidebar } from './components/Sidebar'
-import { Topbar } from './components/Topbar'
-import { TabBar } from './components/TabBar'
-import { CommandPalette } from './components/CommandPalette'
-import { HomePage } from './pages/HomePage'
-import { CategoryPage } from './pages/CategoryPage'
+const Sidebar = lazy(() => import('./components/Sidebar').then((module) => ({ default: module.Sidebar })))
+const Topbar = lazy(() => import('./components/Topbar').then((module) => ({ default: module.Topbar })))
+const TabBar = lazy(() => import('./components/TabBar').then((module) => ({ default: module.TabBar })))
+const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
+const HomePage = lazy(() => import('./pages/HomePage').then((module) => ({ default: module.HomePage })))
+const CategoryPage = lazy(() => import('./pages/CategoryPage').then((module) => ({ default: module.CategoryPage })))
 const PdfEditorWorkspace = lazy(() => import('./pages/ToolStudioPage').then((module) => ({ default: module.PdfEditorWorkspace })))
 const ToolStudioPage = lazy(() => import('./pages/ToolStudioPage').then((module) => ({ default: module.ToolStudioPage })))
-import { NewDocumentPage } from './pages/NewDocumentPage'
-import { RecentFilesPage } from './pages/RecentFilesPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { WorkspaceContextMenu } from './components/WorkspaceContextMenu'
-import { BugReportDialog } from './components/BugReportDialog'
+const NewDocumentPage = lazy(() => import('./pages/NewDocumentPage').then((module) => ({ default: module.NewDocumentPage })))
+const RecentFilesPage = lazy(() => import('./pages/RecentFilesPage').then((module) => ({ default: module.RecentFilesPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const WorkspaceContextMenu = lazy(() => import('./components/WorkspaceContextMenu').then((module) => ({ default: module.WorkspaceContextMenu })))
+const BugReportDialog = lazy(() => import('./components/BugReportDialog').then((module) => ({ default: module.BugReportDialog })))
+const PasswordDialog = lazy(() => import('./editor/PasswordDialog').then((module) => ({ default: module.PasswordDialog })))
+const UpdateDialog = lazy(() => import('./components/UpdateDialog').then((module) => ({ default: module.UpdateDialog })))
 import { ALL_THEME_IDS, DEFAULT_THEME, isLightTheme, normalizeTheme, pairedTheme, themeBrandAccent } from './themes'
 import { allTools, categories } from './toolsData'
 import { loadShortcuts } from './keyboardShortcuts'
@@ -110,32 +111,6 @@ function UnsavedChangesDialog({ onDismiss, stage = 'file', error, onAccept, onCa
   </div>
 }
 
-function UpdateDialog({ update, onSkip, onUpdate }) {
-  const downloading = update.status === 'downloading'
-  const downloaded = update.status === 'downloaded'
-  const failed = update.status === 'error'
-  const macDownload = window.pdfKing?.platform === 'darwin'
-  const updateLabel = downloaded ? 'Restart to Update' : downloading ? 'Downloading…' : failed ? 'Retry Update' : macDownload ? 'Download Update' : 'Update'
-  return <div className="confirm-backdrop update-backdrop" role="presentation">
-    <section className="confirm-panel update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="update-dialog-title" aria-describedby="update-dialog-message" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
-      event.stopPropagation()
-      if (event.key === 'Escape') { event.preventDefault(); onSkip() }
-      else if (event.key === 'Enter' && !event.repeat) { event.preventDefault(); onUpdate() }
-    }}>
-      <div className="confirm-icon"><Icon name="fileDown" size={18} /></div>
-      <h2 className="confirm-title" id="update-dialog-title">A new version is available</h2>
-      <p className="confirm-message" id="update-dialog-message">PDF Dock {update.version} is ready. Update now to get the latest improvements.</p>
-      {downloading && <div className="update-progress" aria-label={`Downloading update ${update.percent || 0}%`}><span style={{ width: `${Math.max(0, Math.min(100, update.percent || 0))}%` }} /></div>}
-      {downloading && <p className="update-status" aria-live="polite">Downloading update… {update.percent || 0}%</p>}
-      {failed && <p className="form-error" role="alert">{update.message || 'The update could not be downloaded. Try again.'}</p>}
-      <div className="confirm-actions">
-        <button type="button" className="confirm-btn" onClick={onSkip}>Skip this version<kbd className="confirm-key-hint">Esc</kbd></button>
-        <button type="button" className="confirm-btn confirm-btn-primary" onClick={onUpdate} data-dialog-accept autoFocus disabled={downloading}><span>{updateLabel}</span>{!downloading && <kbd className="confirm-key-hint" aria-label="Return">↵</kbd>}</button>
-      </div>
-    </section>
-  </div>
-}
-
 function App() {
   // Navigation State
   // { type: 'home' } | { type: 'category', categoryId } | { type: 'tool', toolId } |
@@ -166,7 +141,8 @@ function App() {
   const [contextMenu, setContextMenu] = useState(null)
   const [bugReportContext, setBugReportContext] = useState(null)
   const [actionError, setActionError] = useState('')
-  const [updateInfo, setUpdateInfo] = useState(null)
+  const [updateState, setUpdateState] = useState(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
   const [theme, setTheme] = useState(() => {
     const stored = window.localStorage.getItem('pdf-king-theme')
     const auto = window.localStorage.getItem('pdf-king-auto-theme') !== 'false'
@@ -200,29 +176,6 @@ function App() {
     window.addEventListener('storage', syncStorage)
     return () => window.removeEventListener('storage', syncStorage)
   }, [])
-
-  useEffect(() => {
-    if (!window.pdfKing?.onUpdateState) return undefined
-    const applyUpdateState = (state) => {
-      if (state?.status === 'available' || state?.status === 'downloading' || state?.status === 'downloaded' || state?.status === 'error') setUpdateInfo(state)
-    }
-    const unsubscribe = window.pdfKing.onUpdateState(applyUpdateState)
-    void window.pdfKing.getUpdateState?.().then(applyUpdateState)
-    return unsubscribe
-  }, [])
-
-  const skipUpdate = useCallback(() => {
-    const version = updateInfo?.version
-    if (version) void window.pdfKing?.skipUpdateVersion?.(version)
-    setUpdateInfo(null)
-  }, [updateInfo])
-
-  const startUpdate = useCallback(() => {
-    if (updateInfo?.status === 'downloading') return
-    if (window.pdfKing?.platform !== 'darwin' && updateInfo?.status !== 'downloaded') setUpdateInfo((current) => current ? { ...current, status: 'downloading', percent: 0 } : current)
-    void window.pdfKing?.downloadUpdate?.().catch((error) => setUpdateInfo((current) => current ? { ...current, status: 'error', message: error?.message } : current))
-  }, [updateInfo])
-
 
   const reportTabDirty = (tabId, isDirty) => {
     const next = new Set(dirtyTabIdsRef.current)
@@ -270,6 +223,17 @@ function App() {
     void window.pdfKing?.markRendererReady?.()
     return unsubscribe
   }, [])
+
+  useEffect(() => {
+    if (!window.pdfKing?.onUpdateState) return
+    const unsubscribe = window.pdfKing.onUpdateState(setUpdateState)
+    window.pdfKing.updateGetState?.().then((state) => setUpdateState((current) => current || state)).catch(() => {})
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    if (['available', 'downloaded', 'manual-download', 'error'].includes(updateState?.status)) setUpdateDismissed(false)
+  }, [updateState?.status, updateState?.version])
 
   const cancelLeaveRequest = () => {
     if (!leaveRequest) return
@@ -933,6 +897,7 @@ function App() {
           onSelectLightTheme={(t) => { setSelectedLightTheme(t); window.localStorage.setItem('pdf-king-light', t); if (autoTheme && !window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(t); }}
           commandPaletteSize={commandPaletteSize}
           onSetCommandPaletteSize={(size) => { setCommandPaletteSize(size); window.localStorage.setItem('pdfking-command-palette-size', size) }}
+          onCheckUpdates={() => window.pdfKing?.updateCheck?.()}
         />
         )}
       </main>
@@ -940,11 +905,19 @@ function App() {
 
       <WorkspaceContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAction={handleContextAction} />
       {bugReportContext && <BugReportDialog context={bugReportContext} onClose={() => setBugReportContext(null)} />}
+      {!updateDismissed && <UpdateDialog
+        state={updateState}
+        onDownload={() => window.pdfKing?.updateDownload?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onOpenDownload={() => window.pdfKing?.updateOpenDownload?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onInstall={() => window.pdfKing?.updateInstall?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onSkip={(version) => window.pdfKing?.updateSkip?.(version).then(setUpdateState).catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onClose={() => setUpdateDismissed(true)}
+      />}
       {actionError && <div className="app-action-error" role="alert"><span>{actionError}</span><button type="button" onClick={() => setActionError('')} aria-label="Dismiss error">×</button></div>}
 
-      <NewDocumentPage isOpen={isNewDocumentOpen} mode={newDocumentMode} onNavigate={handleNavigate} onClose={() => setIsNewDocumentOpen(false)} />
+      {isNewDocumentOpen && <NewDocumentPage isOpen mode={newDocumentMode} onNavigate={handleNavigate} onClose={() => setIsNewDocumentOpen(false)} />}
 
-      <CommandPalette
+      {isSearchOpen && <CommandPalette
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         onSelectTool={handleSelectToolPreservingCurrentTool}
@@ -956,12 +929,11 @@ function App() {
         onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onNewTab={createTab}
         size={commandPaletteSize}
-      />
+      />}
       <PasswordDialog />
       {leaveRequest && <UnsavedChangesDialog stage={leaveRequest.stage} error={leaveError} onDismiss={() => {setLeaveRequest(null); setLeaveError(''); window.pdfKing?.cancelCloseWindow?.()}} onAccept={() => resolveLeaveRequest()} onCancel={cancelLeaveRequest} />}
-      {updateInfo && <UpdateDialog update={updateInfo} onSkip={skipUpdate} onUpdate={startUpdate} />}
     </div>
   )
 }
 
-createRoot(document.getElementById('root')).render(<AppErrorBoundary><App /></AppErrorBoundary>)
+createRoot(document.getElementById('root')).render(<AppErrorBoundary><Suspense fallback={null}><App /></Suspense></AppErrorBoundary>)
