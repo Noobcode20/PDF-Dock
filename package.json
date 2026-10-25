@@ -1,6 +1,6 @@
 {
   "name": "pdf-dock-desktop",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.5",
   "private": true,
   "productName": "PDF Dock",
   "description": "A clean desktop PDF workspace.",
@@ -9,9 +9,9 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http://127.0.0.1:5174 && node scripts/launch-electron.cjs\"",
     "build": "vite build",
     "check": "npm run build",
-    "package:mac": "npm run build && electron-builder --mac dmg --x64 --arm64 --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64 --publish never",
     "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs",
+    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs && node scripts/test-updater.mjs",
     "test:repairs": "node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs"
   },
   "dependencies": {
@@ -36,7 +36,8 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "regenerator-runtime": "^0.14.1",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
@@ -69,6 +70,13 @@
             "x64",
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "artifactName": "PDF-Dock-macOS-${arch}.${ext}"
@@ -89,7 +97,17 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Noobcode20",
+        "repo": "PDF-Dock",
+        "releaseType": "prerelease",
+        "channel": "beta"
+      }
+    ],
+    "detectUpdateChannel": true
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

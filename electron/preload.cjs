@@ -13,6 +13,17 @@ contextBridge.exposeInMainWorld('pdfKing', {
   clearRecentFiles: () => ipcRenderer.invoke('pdfking:clear-recent-files'),
   openPdf: () => ipcRenderer.invoke('pdfking:open-pdf'),
   openExternal: (url) => ipcRenderer.invoke('pdfking:open-external', url),
+  updateGetState: () => ipcRenderer.invoke('pdfking:update-get-state'),
+  updateCheck: () => ipcRenderer.invoke('pdfking:update-check'),
+  updateDownload: () => ipcRenderer.invoke('pdfking:update-download'),
+  updateInstall: () => ipcRenderer.invoke('pdfking:update-install'),
+  updateSkip: (version) => ipcRenderer.invoke('pdfking:update-skip', version),
+  updateOpenDownload: () => ipcRenderer.invoke('pdfking:update-open-download'),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('pdfking:update-state', listener)
+    return () => ipcRenderer.removeListener('pdfking:update-state', listener)
+  },
   createWindow: () => ipcRenderer.invoke('pdfking:new-window'),
   closeWindow: () => ipcRenderer.invoke('pdfking:close-window'),
   allowCloseWindow: () => ipcRenderer.invoke('pdfking:allow-close-window'),

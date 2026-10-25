@@ -3245,3 +3245,8 @@ input:checked + .slider-round:before { transform: translateX(16px); }
   .recent-file-card .recent-file-actions { grid-column: 1 / -1; grid-row: 3; }
   .recent-file-card .open-file-btn { width: 100%; min-height: 42px; justify-content: center; }
 }
+
+.update-panel { width: min(460px, calc(100vw - 32px)); }
+.update-progress { position: relative; height: 10px; margin-top: 22px; overflow: hidden; border-radius: 99px; background: var(--panel-hover); }
+.update-progress > div { height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+.update-progress > span { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; text-align: right; }

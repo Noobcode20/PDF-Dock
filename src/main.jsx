@@ -39,6 +39,7 @@ import { NewDocumentPage } from './pages/NewDocumentPage'
 import { RecentFilesPage } from './pages/RecentFilesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { WorkspaceContextMenu } from './components/WorkspaceContextMenu'
+import { UpdateDialog } from './components/UpdateDialog'
 import { ALL_THEME_IDS, DEFAULT_THEME, isLightTheme, normalizeTheme, pairedTheme, themeBrandAccent } from './themes'
 import { allTools, categories } from './toolsData'
 import { loadShortcuts } from './keyboardShortcuts'
@@ -138,6 +139,8 @@ function App() {
   const [commandPaletteSize, setCommandPaletteSize] = useState(() => window.localStorage.getItem('pdfking-command-palette-size') === 'maximized' ? 'maximized' : 'compact')
   const [contextMenu, setContextMenu] = useState(null)
   const [actionError, setActionError] = useState('')
+  const [updateState, setUpdateState] = useState(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (window.localStorage.getItem('pdfking-onboarding-complete') === 'true') return false
     const existingSetupKeys = ['pdf-king-theme', 'pdfking-user-name', 'pdf-king-auto-theme', 'pdfking-keep-recent']
@@ -224,6 +227,17 @@ function App() {
   useEffect(() => window.pdfKing?.onRequestClose?.(() => {
     const guardNext = () => { const tabId = [...dirtyTabIdsRef.current][0]; if(tabId === undefined) window.pdfKing?.allowCloseWindow?.(); else requestLeave(tabId, guardNext, {windowClose:true}) }; guardNext()
   }), [])
+
+  useEffect(() => {
+    if (!window.pdfKing?.onUpdateState) return
+    const unsubscribe = window.pdfKing.onUpdateState(setUpdateState)
+    window.pdfKing.updateGetState?.().then((state) => setUpdateState((current) => current || state)).catch(() => {})
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    if (['available', 'downloaded', 'manual-download', 'error'].includes(updateState?.status)) setUpdateDismissed(false)
+  }, [updateState?.status, updateState?.version])
 
   const cancelLeaveRequest = () => {
     if (!leaveRequest) return
@@ -896,12 +910,21 @@ function App() {
           onSetAvatar={handleSetAvatar}
           commandPaletteSize={commandPaletteSize}
           onSetCommandPaletteSize={(size) => { setCommandPaletteSize(size); window.localStorage.setItem('pdfking-command-palette-size', size) }}
+          onCheckUpdates={() => window.pdfKing?.updateCheck?.()}
         />
         )}
       </main>
       </div>
 
       <WorkspaceContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAction={handleContextAction} />
+      {!updateDismissed && <UpdateDialog
+        state={updateState}
+        onDownload={() => window.pdfKing?.updateDownload?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onOpenDownload={() => window.pdfKing?.updateOpenDownload?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onInstall={() => window.pdfKing?.updateInstall?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onSkip={(version) => window.pdfKing?.updateSkip?.(version).then(setUpdateState).catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}
+        onClose={() => setUpdateDismissed(true)}
+      />}
       {actionError && <div className="app-action-error" role="alert"><span>{actionError}</span><button type="button" onClick={() => setActionError('')} aria-label="Dismiss error">×</button></div>}
 
       <NewDocumentPage isOpen={isNewDocumentOpen} mode={newDocumentMode} onNavigate={handleNavigate} onClose={() => setIsNewDocumentOpen(false)} />

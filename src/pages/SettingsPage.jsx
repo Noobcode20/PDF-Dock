@@ -144,7 +144,7 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
   )
 }
 
-export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onToggleAutoTheme, selectedDarkTheme, selectedLightTheme, onSelectDarkTheme, onSelectLightTheme, userName = 'User', userAvatar, onSetUserName, onSetAvatar, commandPaletteSize = 'compact', onSetCommandPaletteSize }) {
+export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onToggleAutoTheme, selectedDarkTheme, selectedLightTheme, onSelectDarkTheme, onSelectLightTheme, userName = 'User', userAvatar, onSetUserName, onSetAvatar, commandPaletteSize = 'compact', onSetCommandPaletteSize, onCheckUpdates }) {
   const activeTheme = THEMES.find((option) => theme === option.light || theme === option.dark)
   const activeVariant = theme.endsWith('-light') ? 'Light' : 'Dark'
   const [activeSection, setActiveSection] = useState('appearance')
@@ -156,6 +156,7 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
   const [settingsError, setSettingsError] = useState('')
   const [localFonts, setLocalFonts] = useState([])
   const [fontMessage, setFontMessage] = useState('')
+  const [updateMessage, setUpdateMessage] = useState('')
   const fontPicker = useRef(null)
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(userName)
@@ -302,6 +303,10 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
       </div>
 
       <div className="settings-sections" id={`settings-panel-${activeSection}`} role="tabpanel" aria-labelledby={`settings-tab-${activeSection}`}>
+        {activeSection === 'general' && <div className="settings-card">
+          <div className="settings-card-header"><span className="tool-icon green"><Icon name="download" size={18} /></span><div><strong>App updates</strong><small>Check for the latest PDF Dock beta</small></div></div>
+          <div className="settings-card-body"><div className="setting-row"><div><strong>Installed version</strong><p>{updateMessage || 'New versions can be checked without leaving PDF Dock.'}</p></div><button className="ghost-button" type="button" onClick={async () => { setUpdateMessage('Checking for updates…'); try { const state = await onCheckUpdates?.(); setUpdateMessage(state?.status === 'up-to-date' ? 'You’re using the latest version.' : state?.status === 'available' ? `Version ${state.version} is available.` : state?.status === 'error' || state?.status === 'unavailable' ? state.error : 'Update check complete.') } catch (error) { setUpdateMessage(error.message || 'Update check failed.') } }}>Check for updates</button></div></div>
+        </div>}
         {activeSection === 'general' && <div className="settings-card">
           <div className="settings-card-header"><span className="tool-icon lilac"><Icon name="user" size={18} /></span><div><strong>Profile</strong><small>Personalize your workspace</small></div></div>
           <div className="settings-card-body settings-profile-body">

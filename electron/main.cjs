@@ -2,6 +2,8 @@ const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { autoUpdater } = require('electron-updater')
+const { createUpdateController } = require('./updateController.cjs')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
@@ -81,6 +83,27 @@ function trustedRendererFrame(frame) {
 ipcMain.handle = (channel, listener) => originalHandle(channel, (event, ...args) => {
   if (!trustedRendererFrame(event.senderFrame)) throw new Error('This request came from an untrusted renderer frame.')
   return listener(event, ...args)
+})
+const updateController = createUpdateController({
+  updater: autoUpdater,
+  app,
+  send: (state) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('pdfking:update-state', state)
+    }
+  },
+})
+ipcMain.handle('pdfking:update-get-state', () => updateController.getState())
+ipcMain.handle('pdfking:update-check', () => updateController.check())
+ipcMain.handle('pdfking:update-download', () => updateController.download())
+ipcMain.handle('pdfking:update-install', () => updateController.install())
+ipcMain.handle('pdfking:update-skip', (_event, version) => updateController.skip(version))
+ipcMain.handle('pdfking:update-open-download', async () => {
+  const asset = process.platform === 'darwin'
+    ? `PDF-Dock-macOS-${process.arch === 'arm64' ? 'arm64' : 'x64'}.dmg`
+    : 'PDF-Dock-Windows.exe'
+  await shell.openExternal(`https://github.com/Noobcode20/PDF-Dock/releases/latest/download/${asset}`)
+  return true
 })
 const serializeRecentUpdate = (operation) => {
   const next = recentQueue.then(operation, operation)
@@ -387,6 +410,10 @@ app.whenReady().then(() => {
     app.dock.setIcon(path.join(__dirname, '..', 'assets', 'pdf-dock.png'))
   }
   createWindow()
+  if (app.isPackaged && ['darwin', 'win32'].includes(process.platform)) {
+    updateController.initialize()
+    setTimeout(() => { void updateController.check() }, 5000)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
