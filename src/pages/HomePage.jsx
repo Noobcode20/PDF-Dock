@@ -240,14 +240,16 @@ function ConfirmDialog({ isOpen, onClose, fileName, bulkCount = 0, onDelete }) {
   )
 }
 
-export function HomePage({ theme, onNavigate, onOpenPdf }) {
+export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
   const [files, setFiles] = useState([])
   const [error, setError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [pendingFile, setPendingFile] = useState(null)
   const [selectedFiles, setSelectedFiles] = useState(() => new Set())
   const [query, setQuery] = useState('')
-  const visibleFiles = files.filter((file) => file.name.toLowerCase().includes(query.trim().toLowerCase()))
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleFiles = files.filter((file) => String(file.name || '').toLocaleLowerCase().includes(normalizedQuery))
+  const greetingName = String(userName || '').trim()
   const [activeFileId, setActiveFileId] = useState(null)
   const [previewMode, setPreviewMode] = useState(false)
   const [previewPage, setPreviewPage] = useState(1)
@@ -581,7 +583,7 @@ export function HomePage({ theme, onNavigate, onOpenPdf }) {
         <div>
           <div className="home-breadcrumb"><span>WORKSPACE</span><span>/</span><strong>PDF LIBRARY</strong></div>
           <h1 className="home-greeting">Your PDF <span>workspace</span></h1>
-          <p className="home-subtitle">Pick up where you left off.</p>
+          <p className="home-subtitle">{greetingName && greetingName.toLowerCase() !== 'user' ? `Welcome back, ${greetingName}. ` : ''}Pick up where you left off.</p>
         </div>
       </section>
 
@@ -589,7 +591,7 @@ export function HomePage({ theme, onNavigate, onOpenPdf }) {
         <div className="category-header home-documents-heading">
           <div><h1>Recent files</h1><span className="home-file-count">{files.length} {files.length === 1 ? 'document' : 'documents'}</span></div>
         </div>
-        <label className="home-search"><Icon name="search" size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your PDFs..." aria-label="Search recent PDFs" /></label>
+        <label className="home-search"><Icon name="search" size={16} /><input type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your PDFs..." aria-label="Search recent PDFs" aria-controls="home-file-list" /></label>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="home-library-layout">
@@ -600,13 +602,13 @@ export function HomePage({ theme, onNavigate, onOpenPdf }) {
           <p>PDFs you open or export are stored on this device and will appear here.</p>
         </div>
       ) : (
-        <div className="recent-files-table" role="grid" aria-label="Recent documents">
+        <div className="recent-files-table" id="home-file-list" role="grid" aria-label="Recent documents" aria-live="polite">
           <div className="home-file-header" role="row">
             <span className="home-file-select-cell" role="columnheader"><span className="sr-only">Select</span></span>
             <span role="columnheader">Name</span><span role="columnheader">File size</span><span role="columnheader">Pages</span><span role="columnheader">Last opened</span><span className="home-file-delete-cell" role="columnheader"><span className="sr-only">Actions</span></span>
           </div>
           {visibleFiles.length === 0 ? <div className="home-no-results">No PDFs match “{query}”.</div> : visibleFiles.map((file) => (
-            <div key={file.id} data-pdf-id={file.id} data-pdf-name={file.name} className={`recent-file-card home-file-row clickable ${activeFileId === file.id ? 'is-selected' : ''}`} onMouseDown={(event) => { if ((event.shiftKey || event.metaKey || event.ctrlKey) && !event.target.closest('button, input')) event.preventDefault() }} onClick={(event) => selectFile(event, file)} onDoubleClick={(event) => openOnDoubleClick(event, file)} role="row" tabIndex={0} aria-label={`${file.name}; double click or press Enter to open`} aria-selected={activeFileId === file.id} onKeyDown={(event) => { if (previewMode && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return; moveFileSelection(event, file); if (event.defaultPrevented) return; if (event.target.closest('button')) return; if (event.key === 'Enter' && !event.target.closest('input')) { event.preventDefault(); open(file) } }}>
+            <div key={file.id} data-pdf-id={file.id} data-pdf-name={file.name} className={`recent-file-card home-file-row clickable ${activeFileId === file.id ? 'is-selected' : ''}`} onMouseDown={(event) => { if ((event.shiftKey || event.metaKey || event.ctrlKey) && !event.target.closest('button, input')) event.preventDefault() }} onClick={(event) => selectFile(event, file)} onContextMenu={(event) => { if (!event.target.closest('button, input')) { setActiveFileId(file.id); setSelectionNotice(false) } }} onDoubleClick={(event) => openOnDoubleClick(event, file)} role="row" tabIndex={0} aria-label={`${file.name}; double click or press Enter to open`} aria-selected={activeFileId === file.id} onKeyDown={(event) => { if (previewMode && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return; moveFileSelection(event, file); if (event.defaultPrevented) return; if (event.target.closest('button')) return; if (event.key === 'Enter' && !event.target.closest('input')) { event.preventDefault(); open(file) } }}>
               <div className="home-file-select-cell" role="gridcell"><input type="checkbox" checked={selectedFiles.has(file.id)} onClick={(event) => {
                 if (event.shiftKey) { event.preventDefault(); selectFileRange(file.id) }
               }} onChange={(event) => {

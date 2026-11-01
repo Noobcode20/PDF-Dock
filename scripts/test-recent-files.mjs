@@ -11,9 +11,11 @@ const require = createRequire(import.meta.url),
 const electron = {
   app: {
     getPath: () => directory,
-    getVersion: () => "0.1.0-beta.5",
+    getVersion: () => "0.1.0-beta.2",
+    isPackaged: false,
     getAppPath: () => process.cwd(),
     whenReady: () => ({ then: () => {} }),
+    requestSingleInstanceLock: () => true,
     on: () => {},
   },
   BrowserWindow: {},

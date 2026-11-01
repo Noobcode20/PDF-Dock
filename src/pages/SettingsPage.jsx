@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Icon } from '../icons'
 import { THEMES, isLightTheme } from '../themes'
-import { DEFAULT_SHORTCUTS, loadShortcuts, saveShortcuts } from '../keyboardShortcuts'
+import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, findShortcutConflict, loadShortcuts, saveShortcuts } from '../keyboardShortcuts'
 import { listLocalFonts, readFontFamilyName, removeLocalFont, saveLocalFont } from '../editor/localFonts'
 import { recentFilesBackend } from '../recentFiles'
 import { FeedbackSettings } from '../components/FeedbackSettings'
@@ -11,35 +11,15 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
   const [recording, setRecording] = useState(null)
   const [savedAction, setSavedAction] = useState(null)
 
-  const actions = [
-    ['search', 'Quick search'],
-    ['new-window', 'New window'],
-    ['open-file', 'Open PDF'],
-    ['save-export', 'Save document'],
-    ['undo', 'Undo'],
-    ['redo', 'Redo'],
-    ['close-overlay', 'Close dialog or menu'],
-    ['navigate-home', 'Go to Home'],
-    ['navigate-recent', 'Go to Recent files'],
-    ['navigate-settings', 'Go to Settings'],
-    ['navigate-editor', 'Go to Editor'],
-    ['new-document', 'New document'],
-    ['new-tab', 'New tab'],
-    ['close-tab', 'Close tab'],
-    ['close-window', 'Close window'],
-    ['toggle-sidebar', 'Toggle sidebar'],
-    ['toggle-theme', 'Toggle light/dark theme'],
-    ['print-document', 'Print PDF'],
-    ['toggle-right-sidebar', 'Toggle editor properties panel'],
-    ['focus-editor-search', 'Find in PDF'],
-    ['editor-page-next', 'Next PDF page'],
-    ['editor-page-previous', 'Previous PDF page'],
-    ['editor-page-first', 'First PDF page'],
-    ['editor-page-last', 'Last PDF page'],
-    ['editor-zoom-in', 'Zoom in'],
-    ['editor-zoom-out', 'Zoom out'],
-    ['editor-zoom-reset', 'Reset zoom']
-  ]
+  const actions = SHORTCUT_ACTIONS
+  const repeatActions = new Set(['search', 'open-file'])
+
+  const setToggleOnRepeat = (key, enabled) => {
+    const updated = { ...shortcuts, [key]: { ...shortcuts[key], toggleOnRepeat: enabled } }
+    setShortcuts(updated)
+    saveShortcuts(updated)
+  }
+
   useEffect(() => {
     const handle = (e) => {
       if (!recording) return
@@ -54,23 +34,11 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
       const comboStr = [e.metaKey ? 'meta' : '', e.ctrlKey ? 'ctrl' : '', e.altKey ? 'alt' : '', e.shiftKey ? 'shift' : '', e.key.length === 1 ? e.key.toLowerCase() : e.key].filter(Boolean).join('+')
       const captured = { combo: comboStr, metaKey: !!e.metaKey, ctrlKey: !!e.ctrlKey, shiftKey: !!e.shiftKey, altKey: !!e.altKey, key: e.key }
       const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
-      const signature = (shortcut) => {
-        if (!shortcut?.key) return ''
-        const modifier = shortcut.metaKey && shortcut.ctrlKey
-          ? 'platform'
-          : shortcut.metaKey
-            ? (isMac ? 'platform' : 'meta')
-            : shortcut.ctrlKey
-              ? (isMac ? 'ctrl' : 'platform')
-              : ''
-        return [modifier, !!shortcut.altKey, !!shortcut.shiftKey, shortcut.key.toLowerCase()].join('|')
-      }
-      const nextSignature = signature(captured)
       const updated = { ...shortcuts, [recording]: { ...shortcuts[recording], ...captured } }
-      for (const [action, shortcut] of Object.entries(updated)) {
-        if (action !== recording && signature(shortcut) === nextSignature) {
-          updated[action] = { ...shortcut, combo: '—', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, key: '' }
-        }
+      let conflict = findShortcutConflict(updated, recording, captured, isMac)
+      while (conflict) {
+        updated[conflict] = { ...updated[conflict], combo: '—', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, key: '' }
+        conflict = findShortcutConflict(updated, recording, captured, isMac)
       }
       setShortcuts(updated)
       saveShortcuts(updated)
@@ -102,8 +70,10 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
       if (shortcut.ctrlKey) parts.push('Ctrl')
     }
     if (shortcut.altKey) parts.push('⌥')
-    if (shortcut.shiftKey) parts.push('⇧')
-    parts.push(shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key)
+    const zoomAlias = shortcut.key === '+' || shortcut.key === '_'
+    if (shortcut.shiftKey && !zoomAlias) parts.push('⇧')
+    const key = shortcut.key === '+' ? '=' : shortcut.key === '_' ? '-' : shortcut.key
+    parts.push(key.length === 1 ? key.toUpperCase() : key)
     return parts.join(' + ')
   }
 
@@ -125,6 +95,7 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
               <span className="shortcut-saved" aria-live="polite">{savedAction === key ? 'Saved' : ''}</span>
             </span>
           </button>
+          {repeatActions.has(key) && <label className="shortcut-repeat-toggle"><input type="checkbox" checked={shortcuts[key]?.toggleOnRepeat !== false} onChange={(event) => setToggleOnRepeat(key, event.target.checked)} /><span>Press again to close</span></label>}
           {showAll && shortcuts[key]?.key && <button type="button" className="shortcut-clear" onClick={() => clearShortcut(key)} aria-label={`Clear shortcut for ${label}`}>Clear</button>}
         </div>
       ))}
@@ -136,7 +107,7 @@ function InteractiveShortcuts({ showAll, setShowAll }) {
   )
 }
 
-export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onToggleAutoTheme, selectedDarkTheme, selectedLightTheme, onSelectDarkTheme, onSelectLightTheme, commandPaletteSize = 'compact', onSetCommandPaletteSize, onCheckUpdates }) {
+export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onToggleAutoTheme, selectedDarkTheme, selectedLightTheme, onSelectDarkTheme, onSelectLightTheme, userName = 'User', userAvatar, onSetUserName, onSetAvatar, commandPaletteSize = 'compact', onSetCommandPaletteSize, onCheckUpdates }) {
   const activeTheme = THEMES.find((option) => theme === option.light || theme === option.dark)
   const activeVariant = theme.endsWith('-light') ? 'Light' : 'Dark'
   const [activeSection, setActiveSection] = useState('appearance')
@@ -150,6 +121,10 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
   const [fontMessage, setFontMessage] = useState('')
   const [updateMessage, setUpdateMessage] = useState('')
   const fontPicker = useRef(null)
+  const [editingName, setEditingName] = useState(false)
+  const [draftName, setDraftName] = useState(userName)
+  const avatarPicker = useRef(null)
+  const nameInput = useRef(null)
   const hasNativeOutputFolder = Boolean(window.pdfKing?.chooseOutputFolder)
 
   useEffect(() => {
@@ -173,7 +148,7 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
     try {
       const data = await file.arrayBuffer()
       const id = crypto.randomUUID()
-      const name = await readFontFamilyName(data, file.name.replace(/\.(ttf|otf|woff2?)$/i, ''))
+      const name = readFontFamilyName(data, file.name.replace(/\.(ttf|otf|woff2?)$/i, ''))
       await saveLocalFont({ id, name, fileName: file.name, size: file.size, data })
       setLocalFonts(await listLocalFonts())
       setSettingsError('')
@@ -214,23 +189,57 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
     } catch (cause) { setSettingsError(cause.message || 'Could not choose an export folder.') }
   }
 
+  const beginNameEdit = () => {
+    setDraftName(userName)
+    setEditingName(true)
+    requestAnimationFrame(() => nameInput.current?.focus())
+  }
+
+  const saveName = () => {
+    const nextName = draftName.trim()
+    if (nextName && onSetUserName) onSetUserName(nextName)
+    setEditingName(false)
+  }
+
+  const chooseAvatar = (event) => {
+    const file = event.target.files?.[0]
+    if (!file || !onSetAvatar) return
+    event.target.value = ''
+    if (!file.type.startsWith('image/')) { setSettingsError('Choose an image file for your profile photo.'); return }
+    if (file.size > 20 * 1024 * 1024) { setSettingsError('Choose an image smaller than 20 MB.'); return }
+    createImageBitmap(file).then((bitmap) => {
+      const canvas = document.createElement('canvas')
+      const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height))
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+      bitmap.close()
+      onSetAvatar(canvas.toDataURL('image/jpeg', 0.86))
+      setSettingsError('')
+    }).catch(() => setSettingsError('Could not read this image. Choose another photo.'))
+  }
+
   const selectThemeVariant = (themeId, mode) => {
+    // Keep a persistent choice for each mode, even while system matching is off.
+    if (mode === 'light') onSelectLightTheme?.(themeId)
+    else onSelectDarkTheme?.(themeId)
     if (autoTheme) {
-      if (mode === 'light') onSelectLightTheme?.(themeId)
-      else onSelectDarkTheme?.(themeId)
+      const systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+      if ((mode === 'dark') === systemIsDark) onSelectTheme?.(themeId)
     } else onSelectTheme?.(themeId)
   }
 
   const renderThemeChoice = (option, mode) => {
     const themeId = mode === 'light' ? option.light : option.dark
-    const selected = theme === themeId
+    const selected = mode === 'light' ? selectedLightTheme === themeId : selectedDarkTheme === themeId
+    const active = theme === themeId
     return <button
       key={mode}
       type="button"
-      className={`theme-choice ${selected ? 'selected' : ''}`}
+      className={`theme-choice ${selected ? 'selected' : ''} ${active ? 'active' : ''}`}
       data-theme={themeId}
+      aria-label={`${option.name} ${mode} theme${selected ? `, chosen for ${mode} mode` : ''}${active ? ', currently active' : ''}`}
       aria-pressed={selected}
-      aria-label={`${option.name} ${mode} theme${selected ? ', selected' : ''}`}
       onClick={() => selectThemeVariant(themeId, mode)}
     >
       <span className="theme-preview" aria-hidden="true">
@@ -267,6 +276,19 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
           <div className="settings-card-header"><span className="tool-icon green"><Icon name="download" size={18} /></span><div><strong>App updates</strong><small>Check for the latest PDF Dock beta</small></div></div>
           <div className="settings-card-body"><div className="setting-row"><div><strong>Installed version</strong><p>{updateMessage || 'New versions can be checked without leaving PDF Dock.'}</p></div><button className="ghost-button" type="button" onClick={async () => { setUpdateMessage('Checking for updates…'); try { const state = await onCheckUpdates?.(); setUpdateMessage(state?.status === 'up-to-date' ? 'You’re using the latest version.' : state?.status === 'available' ? `Version ${state.version} is available.` : state?.status === 'error' || state?.status === 'unavailable' ? state.error : 'Update check complete.') } catch (error) { setUpdateMessage(error.message || 'Update check failed.') } }}>Check for updates</button></div></div>
         </div>}
+        {activeSection === 'general' && <div className="settings-card">
+          <div className="settings-card-header"><span className="tool-icon lilac"><Icon name="user" size={18} /></span><div><strong>Profile</strong><small>Personalize your workspace</small></div></div>
+          <div className="settings-card-body settings-profile-body">
+            <button className="greeting-avatar" type="button" onClick={() => avatarPicker.current?.click()} aria-label="Change profile picture" title="Change profile picture">
+              {userAvatar ? <img src={userAvatar} alt="" /> : <span><Icon name="user" size={24} /></span>}
+              <span className="greeting-avatar-edit"><Icon name="edit" size={12} /></span>
+            </button>
+            {editingName ? <input ref={nameInput} className="greeting-name-input" aria-label="Edit your name" value={draftName} onChange={(event) => setDraftName(event.target.value)} onBlur={saveName} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveName() } if (event.key === 'Escape') { setDraftName(userName); setEditingName(false) } }} /> : <div className="settings-profile-name"><strong>{userName}</strong><small>Local profile</small></div>}
+            {!editingName && <button className="ghost-button" type="button" onClick={beginNameEdit}><Icon name="edit" size={14} />Edit name</button>}
+            <input ref={avatarPicker} className="avatar-file-input" type="file" accept="image/*" aria-label="Choose a profile picture" onChange={chooseAvatar} />
+          </div>
+        </div>}
+
         {activeSection === 'general' && <div className="settings-card">
           <div className="settings-card-header">
             <span className="tool-icon blue"><Icon name="type" size={18} /></span>
@@ -328,18 +350,20 @@ export function SettingsPage({ theme, onSelectTheme, onNavigate, autoTheme, onTo
           </div>
           <div className="settings-card-body theme-settings-body">
             <div className="setting-row settings-color-mode-row">
-              <strong>Color mode</strong>
+              <div className="settings-mode-copy"><strong>Color mode</strong><small>{autoTheme ? 'Set by your device' : 'Choose manually'}</small></div>
               <div className="theme-toggle-group" role="group" aria-label="Color mode">
                 {['light', 'dark'].map((mode) => <button key={mode} type="button" className={`settings-mode-button ${isLightTheme(theme) === (mode === 'light') ? 'selected' : ''}`} aria-pressed={isLightTheme(theme) === (mode === 'light')} onClick={() => { onToggleAutoTheme?.(false); onSelectTheme?.(mode === 'light' ? selectedLightTheme : selectedDarkTheme) }}>{mode === 'light' ? 'Light' : 'Dark'}</button>)}
               </div>
             </div>
             <div className="setting-row theme-auto-toggle-row">
               <div>
-                <strong>Match system appearance</strong>
-                <p>Automatically switch between your chosen dark and light themes when your OS changes mode.</p>
+                <div className="theme-auto-title"><strong>Match system appearance</strong><span className={`theme-auto-status ${autoTheme ? 'on' : ''}`}>{autoTheme ? 'On' : 'Off'}</span></div>
+                <p>{autoTheme
+                  ? `Following your device’s ${isLightTheme(theme) ? 'light' : 'dark'} appearance. Change your device setting to switch themes, or turn this off to choose Light or Dark here.`
+                  : 'Your theme stays as selected. Turn this on to follow your device’s light and dark appearance automatically.'}</p>
               </div>
-              <label className="toggle-switch">
-                <input type="checkbox" checked={!!autoTheme} onChange={(e) => onToggleAutoTheme && onToggleAutoTheme(e.target.checked)} />
+              <label className="toggle-switch" aria-label="Match system appearance">
+                <input type="checkbox" checked={!!autoTheme} aria-label="Match system appearance" onChange={(e) => onToggleAutoTheme && onToggleAutoTheme(e.target.checked)} />
                 <span className="slider-round" />
               </label>
             </div>

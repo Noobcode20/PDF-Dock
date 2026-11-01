@@ -5,7 +5,6 @@ import { getBugReportPreferredMethod, submitFeedbackReport } from '../feedbackRe
 
 export function BugReportDialog({ context, onClose }) {
   const [method, setMethod] = useState('account')
-  const [methodReady, setMethodReady] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [expected, setExpected] = useState('')
@@ -21,12 +20,11 @@ export function BugReportDialog({ context, onClose }) {
     // A context-menu report should use the connected account whenever one is
     // available, regardless of the feedback method previously saved in Settings.
     getBugReportPreferredMethod()
-      .then((preferred) => { if (active) { setMethod(preferred); setMethodReady(true); setError('') } })
+      .then((preferred) => { if (active) { setMethod(preferred); setError('') } })
       .catch(() => {
         if (active) {
-          setMethod('anonymous')
-          setMethodReady(true)
-          setError('Could not verify your GitHub connection. Check Settings → Bugs & Requests, then try again.')
+          setMethod('account')
+          setError('Could not verify your GitHub connection. Submit to retry, or check Settings → Bugs & Requests.')
         }
       })
     return () => { active = false }
@@ -77,7 +75,7 @@ export function BugReportDialog({ context, onClose }) {
         {moreContext && <div className="bug-report-extra-context"><label className="bug-report-field">What did you expect to happen?<textarea rows={2} maxLength={3000} value={expected} onChange={(event) => setExpected(event.target.value)} placeholder="Optional" /></label><label className="bug-report-field">Steps to reproduce<textarea rows={3} maxLength={5000} value={steps} onChange={(event) => setSteps(event.target.value)} placeholder="Optional. List the steps that led to the problem." /></label></div>}
         <label className="feedback-honeypot" aria-hidden="true">Company<input tabIndex={-1} autoComplete="off" value={company} onChange={(event) => setCompany(event.target.value)} /></label>
         {error && <p className="form-error" role="alert">{error}</p>}
-        <footer className="bug-report-footer"><p className="bug-report-privacy"><Icon name="shield" size={15} />Your documents stay private. We only include what you write and basic app details.</p><div className="bug-report-actions"><button type="submit" className="ghost-button" disabled={!methodReady || busy || title.trim().length < 4 || description.trim().length < 10}><Icon name="arrow" size={15} />{!methodReady ? 'Checking GitHub…' : busy ? 'Submitting…' : 'Submit report'}</button></div></footer>
+        <footer className="bug-report-footer"><p className="bug-report-privacy"><Icon name="shield" size={15} />Your documents stay private. We only include what you write and basic app details.</p><div className="bug-report-actions"><button type="submit" className="ghost-button" disabled={busy || title.trim().length < 4 || description.trim().length < 10}><Icon name="arrow" size={15} />{busy ? 'Submitting…' : 'Submit report'}</button></div></footer>
       </form>}
     </section>
   </div></Presence>

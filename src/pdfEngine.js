@@ -954,19 +954,46 @@ async function processKnown(toolId, files, options, onProgress) {
   if (['merge-pdf'].includes(toolId)) {
     requirePdf(files, 2)
     const result = await PDFDocument.create()
+    const sources = []
     for (let i = 0; i < files.length; i += 1) {
       const { pdf } = await loadPdf(files[i])
-      const pages = await result.copyPages(pdf, pdf.getPageIndices())
-      pages.forEach((page) => result.addPage(page))
-      progress(onProgress, (i + 1) / files.length, `Merged ${i + 1} of ${files.length} files`)
+      sources.push(await result.copyPages(pdf, pdf.getPageIndices()))
+      progress(onProgress, (i + 1) / files.length, `Prepared ${i + 1} of ${files.length} files`)
     }
+    if (options.mergeMode === 'custom' && Array.isArray(options.mergePageOrder)) {
+      const sourceIndexes = new Map(files.map((sourceFile, index) => [`${sourceFile.name}:${sourceFile.size}:${sourceFile.lastModified}`, index]))
+      const added = new Set()
+      for (const page of options.mergePageOrder) {
+        const sourceIndex = sourceIndexes.get(page.fileKey)
+        const pageIndex = Number(page.page) - 1
+        const key = `${sourceIndex}:${pageIndex}`
+        if (sourceIndex === undefined || !Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= sources[sourceIndex].length || added.has(key)) continue
+        result.addPage(sources[sourceIndex][pageIndex])
+        added.add(key)
+      }
+      for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+        for (let pageIndex = 0; pageIndex < sources[sourceIndex].length; pageIndex += 1) {
+          const key = `${sourceIndex}:${pageIndex}`
+          if (!added.has(key)) result.addPage(sources[sourceIndex][pageIndex])
+        }
+      }
+    } else if (options.mergeMode === 'interlaced') {
+      const longest = Math.max(...sources.map((pages) => pages.length))
+      for (let pageIndex = 0; pageIndex < longest; pageIndex += 1) {
+        for (const pages of sources) if (pages[pageIndex]) result.addPage(pages[pageIndex])
+      }
+    } else sources.flat().forEach((page) => result.addPage(page))
     return [output('merged.pdf', await savePdf(result))]
   }
 
   if (['split-pdf', 'extract-pages'].includes(toolId)) {
     requirePdf(files)
-    const outputs = await extractGroups(file, { ...options, ranges: toolId === 'extract-pages' ? (options.pages ?? options.ranges) : options.ranges, groupRanges: toolId === 'extract-pages' ? false : options.groupRanges, mode: toolId === 'split-pdf' ? (options.mode || options.splitMode) : undefined }, onProgress)
-    if (toolId === 'extract-pages' && outputs.length !== 1) fail('Extract pages creates one PDF. Use split mode “all” to create a separate PDF for each page.')
+    const outputs = await extractGroups(file, {
+      ...options,
+      ranges: toolId === 'extract-pages' ? (options.pages ?? options.ranges) : options.ranges,
+      groupRanges: toolId === 'extract-pages' ? false : options.groupRanges,
+      mode: toolId === 'split-pdf' ? (options.mode || options.splitMode) : options.extractMode === 'each' ? 'all' : undefined,
+    }, onProgress)
     return outputs
   }
 
@@ -2081,7 +2108,7 @@ export async function renderPdfThumbnail(file, pageNumber, canvas, targetWidth =
   try {
     const size = await inspectPdfPageSize(file, pageNumber)
     if (renderOptions.signal?.aborted) return { status: 'CANCELLED' }
-    return renderPdfPage(file, pageNumber, canvas, Math.min(1, targetWidth / size.width), { ...renderOptions, priority, thumbnail: true })
+    return renderPdfPage(file, pageNumber, canvas, Math.min(3, targetWidth / size.width), { ...renderOptions, priority })
   } catch (error) { return renderOptions.signal?.aborted ? { status: 'CANCELLED' } : { status: 'FAILED', error } }
 }
 
