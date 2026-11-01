@@ -39,10 +39,12 @@ import { NewDocumentPage } from './pages/NewDocumentPage'
 import { RecentFilesPage } from './pages/RecentFilesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { WorkspaceContextMenu } from './components/WorkspaceContextMenu'
+import { BugReportDialog } from './components/BugReportDialog'
 import { UpdateDialog } from './components/UpdateDialog'
 import { ALL_THEME_IDS, DEFAULT_THEME, isLightTheme, normalizeTheme, pairedTheme, themeBrandAccent } from './themes'
 import { allTools, categories } from './toolsData'
-import { loadShortcuts } from './keyboardShortcuts'
+import { toolOptionsSchema } from './cliToolSchemas'
+import { loadShortcuts, matchesShortcut } from './keyboardShortcuts'
 import { Icon } from './icons'
 import { installBrowserBridge, recentFilesBackend } from './recentFiles'
 
@@ -138,9 +140,10 @@ function App() {
   const [newDocumentMode, setNewDocumentMode] = useState('new')
   const [commandPaletteSize, setCommandPaletteSize] = useState(() => window.localStorage.getItem('pdfking-command-palette-size') === 'maximized' ? 'maximized' : 'compact')
   const [contextMenu, setContextMenu] = useState(null)
-  const [actionError, setActionError] = useState('')
+  const [bugReportContext, setBugReportContext] = useState(null)
   const [updateState, setUpdateState] = useState(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
+  const [actionError, setActionError] = useState('')
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (window.localStorage.getItem('pdfking-onboarding-complete') === 'true') return false
     const existingSetupKeys = ['pdf-king-theme', 'pdfking-user-name', 'pdf-king-auto-theme', 'pdfking-keep-recent']
@@ -156,13 +159,124 @@ function App() {
     return v === 'true'
   })
   const [selectedDarkTheme, setSelectedDarkTheme] = useState(() => {
-    return normalizeTheme(window.localStorage.getItem('pdf-king-dark'), 'violet-dark')
+    const stored = window.localStorage.getItem('pdf-king-dark')
+    const active = normalizeTheme(window.localStorage.getItem('pdf-king-theme'))
+    return normalizeTheme(stored, active.endsWith('-dark') ? active : 'violet-dark')
   })
   const [selectedLightTheme, setSelectedLightTheme] = useState(() => {
-    return normalizeTheme(window.localStorage.getItem('pdf-king-light'), 'violet-light')
+    const stored = window.localStorage.getItem('pdf-king-light')
+    const active = normalizeTheme(window.localStorage.getItem('pdf-king-theme'))
+    return normalizeTheme(stored, active.endsWith('-light') ? active : 'violet-light')
   })
   const [userName, setUserName] = useState(() => window.localStorage.getItem('pdfking-user-name') || 'User')
   const [userAvatar, setUserAvatar] = useState(() => window.localStorage.getItem('pdfking-user-avatar') || null)
+
+  useEffect(() => {
+    if (!window.pdfKing?.cliMode) return
+    let cancelled = false
+    const executeCliRequest = async () => {
+      try {
+        const request = await window.pdfKing.getCliRequest()
+        const files = (request.files || []).map((entry) => new File([entry.data], entry.name, {
+          type: /\.(png)$/i.test(entry.name) ? 'image/png' : /\.(jpe?g)$/i.test(entry.name) ? 'image/jpeg' : /\.docx$/i.test(entry.name) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : /\.pptx$/i.test(entry.name) ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/pdf',
+          lastModified: entry.lastModified || Date.now(),
+        }))
+        if (cancelled) return
+        if (request.command === 'tools') {
+          const commands = [
+            { name: 'run', description: 'Run one of the tools below.', schema: { type: 'object', required: ['tool', 'files'], properties: { tool: { type: 'string', enum: allTools.map((tool) => tool.id) }, files: { type: 'array', items: { type: 'string' } }, options: { type: 'object', description: 'See the selected tool optionsSchema.' }, output: { type: 'string', description: 'Output filename for a single result or directory for multiple results.' }, force: { type: 'boolean' } } } },
+            { name: 'inspect', description: 'Read PDF page count and dimensions.', schema: { type: 'object', required: ['file'], properties: { file: { type: 'string' } } } },
+            { name: 'search', description: 'Search local PDF text.', schema: { type: 'object', required: ['file', 'query'], properties: { file: { type: 'string' }, query: { type: 'string' }, options: { type: 'object', properties: { caseSensitive: { type: 'boolean' }, wholeWord: { type: 'boolean' }, regex: { type: 'boolean' }, candidatePages: { type: 'array', items: { type: 'integer', minimum: 1 } } } } } } },
+            { name: 'create', description: 'Create a blank PDF.', schema: { type: 'object', properties: { output: { type: 'string' }, options: { type: 'object', properties: { pageSize: { oneOf: [{ type: 'string', enum: ['a4', 'letter', 'legal'] }, { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 }] }, orientation: { type: 'string', enum: ['portrait', 'landscape'] }, pageCount: { type: 'integer', minimum: 1, maximum: 500 } } } } } },
+            { name: 'edit', description: 'Apply editor operations to a PDF. Input files after index 0 supply inserted PDFs or image data.', schema: { type: 'object', required: ['files', 'operations'], properties: { files: { type: 'array', items: { type: 'string' }, minItems: 1 }, operations: { type: 'array', minItems: 1, items: { type: 'object', required: ['type'] } }, output: { type: 'string' }, outputName: { type: 'string' }, force: { type: 'boolean' } } } },
+            { name: 'tools', description: 'Return this tool and command catalog.', schema: { type: 'object' } },
+          ]
+          window.pdfKing.cliResult({ ok: true, command: 'tools', data: { commands, tools: allTools.map(({ id, name, categoryLabel, description, kind }) => ({ id, name, category: categoryLabel, description, kind, optionsSchema: toolOptionsSchema(id) })) } })
+          return
+        }
+        if (request.command === 'inspect') {
+          if (!files[0]) throw new Error('Set "file" to a PDF path.')
+          const { inspectPdf } = await import('./pdfEngine')
+          window.pdfKing.cliResult({ ok: true, command: 'inspect', data: await inspectPdf(files[0]) })
+          return
+        }
+        if (request.command === 'search') {
+          if (!files[0]) throw new Error('Set "file" to a PDF path.')
+          if (typeof request.query !== 'string' || !request.query) throw new Error('Set "query" to a non-empty string.')
+          const { searchPdfDocument } = await import('./pdfEngine')
+          const data = await searchPdfDocument(files[0], request.query, {
+            ...(request.options || {}),
+            onProgress: (state) => window.pdfKing.cliProgress({ tool: 'search', value: state.page / Math.max(1, state.total), message: `Searched page ${state.page} of ${state.total}` }),
+          })
+          window.pdfKing.cliResult({ ok: true, command: 'search', data })
+          return
+        }
+        if (request.command === 'create') {
+          const { createBlankPdf } = await import('./pdfEngine')
+          const output = await createBlankPdf(request.options || {})
+          window.pdfKing.cliResult({ ok: true, command: 'create', outputs: [output] })
+          return
+        }
+        if (request.command === 'edit') {
+          if (!files[0]) throw new Error('Set "files" to include the source PDF path.')
+          if (!Array.isArray(request.operations) || !request.operations.length) throw new Error('Set "operations" to a non-empty array of editor operations.')
+          const prepared = await Promise.all(request.operations.map(async (operation) => {
+            const next = { ...operation }
+            if (next.type === 'insert') {
+              const sourceIndex = Number(next.fileIndex ?? 1)
+              if (!files[sourceIndex]) throw new Error(`Insert operation references missing file index ${sourceIndex}.`)
+              next.bytes = new Uint8Array(await files[sourceIndex].arrayBuffer())
+              delete next.fileIndex
+            }
+            if (next.fontDataFileIndex != null) {
+              const fontFile = files[Number(next.fontDataFileIndex)]
+              if (!fontFile) throw new Error(`Text operation references missing font file index ${next.fontDataFileIndex}.`)
+              next.fontData = new Uint8Array(await fontFile.arrayBuffer())
+              delete next.fontDataFileIndex
+            }
+            for (const [indexKey, dataKey] of [['sourceFileIndex', 'sourceData'], ['replacementFileIndex', 'replacementData']]) {
+              if (next[indexKey] == null) continue
+              const image = files[Number(next[indexKey])]
+              if (!image) throw new Error(`Image operation references missing file index ${next[indexKey]}.`)
+              next[dataKey] = new Uint8Array(await image.arrayBuffer())
+              if (dataKey === 'replacementData') next.replacementType = image.type
+              delete next[indexKey]
+            }
+            return next
+          }))
+          const { applyOperations } = await import('./editor/operations.js')
+          const bytes = new Uint8Array(await files[0].arrayBuffer())
+          const result = await applyOperations(bytes, prepared)
+          window.pdfKing.cliResult({ ok: true, command: 'edit', outputs: [{ name: request.outputName || `${files[0].name.replace(/\.pdf$/i, '')}_edited.pdf`, data: result, mimeType: 'application/pdf' }] })
+          return
+        }
+        if (request.command !== 'run') throw new Error(`Unknown command "${request.command}". Use run, tools, inspect, search, edit, or create.`)
+        const toolId = request.tool || request.toolId
+        if (!toolId) throw new Error('Set "tool" to a PDF Dock tool ID. Run pdf-dock tools to list IDs.')
+        if (!allTools.some((tool) => tool.id === toolId) && !['edit-text', 'add-text', 'images'].includes(toolId)) throw new Error(`Unknown tool "${toolId}". Run pdf-dock tools to list IDs.`)
+        const { processTool } = await import('./pdfEngine')
+        const options = { ...(request.options || {}) }
+        if (toolId === 'merge-pdf' && Array.isArray(options.mergePageOrder)) {
+          options.mergePageOrder = options.mergePageOrder.map((entry) => {
+            const file = files[Number(entry.fileIndex)]
+            if (!file) throw new Error(`Merge order references missing file index ${entry.fileIndex}.`)
+            return { fileKey: `${file.name}:${file.size}:${file.lastModified}`, page: entry.page }
+          })
+        }
+        const result = await processTool({
+          toolId,
+          files,
+          options,
+          onProgress: (state) => window.pdfKing.cliProgress({ tool: toolId, ...state }),
+        })
+        window.pdfKing.cliResult({ ok: true, command: 'run', message: result.message, outputs: result.outputs })
+      } catch (error) {
+        if (!cancelled) window.pdfKing.cliResult({ ok: false, error: error.message || String(error), outputs: [] })
+      }
+    }
+    void executeCliRequest()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     const syncStorage = (event) => {
@@ -516,6 +630,22 @@ function App() {
     })
   }
 
+  useEffect(() => {
+    if (!window.pdfKing?.onOpenFile || !window.pdfKing?.readOpenedPdf) return
+    return window.pdfKing.onOpenFile((filePath) => {
+      requestLeave(activeTabIdRef.current, async () => {
+        try {
+          const opened = await window.pdfKing.readOpenedPdf(filePath)
+          const file = new File([opened.data], opened.name, { type: 'application/pdf' })
+          file.sourcePath = opened.filePath
+          handleNavigateNow({ type: 'tool', toolId: 'pdf-editor', files: [file] })
+        } catch (error) {
+          console.error('Could not open the requested PDF:', error)
+        }
+      })
+    })
+  }, [])
+
   const handleOpenNewWindow = async () => {
     if (window.pdfKing?.createWindow) {
       try { await window.pdfKing.createWindow() } catch (error) { console.error('Could not open a new window:', error) }
@@ -559,10 +689,9 @@ function App() {
   }
 
   const handleWorkspaceContextMenu = (event) => {
-    if (isSearchOpen || isNewDocumentOpen || showOnboarding) return
-    const nativeTarget = event.target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
-    if (nativeTarget) return
     const target = event.target
+    const nativeTarget = target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+    if (nativeTarget && window.pdfKing?.platform && window.pdfKing.platform !== 'web') return
     const pdfPage = target.closest('.acrobat-document-page')
     const fileRow = target.closest('[data-pdf-id]')
     const themeChoice = target.closest('.theme-choice[data-theme]')
@@ -594,7 +723,7 @@ function App() {
         items = [{ id: 'edit-text-mode', label: 'Edit text on this page', icon: 'pen', type: 'edit-text' }, { id: 'add-text-here', label: 'Add text to this page', icon: 'plus', type: 'editor-tool', toolId: 'add-text' }, { separator: true }, { id: 'highlight-page', label: 'Highlight text', icon: 'edit', type: 'editor-tool', toolId: 'highlight' }, { id: 'underline-page', label: 'Underline text', icon: 'pen', type: 'editor-tool', toolId: 'underline' }, { id: 'add-image-page', label: 'Add or edit images', icon: 'image', type: 'editor-tool', toolId: 'images' }]
       }
     } else if (fileRow) {
-      const open = { id: 'open-file', label: `Open ${fileContext.fileName}`, icon: 'file', type: 'open-file', ...fileContext }
+      const open = { id: 'open-file', label: 'Open PDF', icon: 'file', type: 'open-file', ...fileContext }
       const fileActions = currentView.type === 'recent'
         ? [['compress-pdf', 'Compress PDF'], ['split-pdf', 'Split pages'], ['organize-pdf', 'Organize pages'], ['pdf-to-word', 'Convert to Word']]
         : [['compress-pdf', 'Compress PDF'], ['split-pdf', 'Split pages'], ['organize-pdf', 'Organize pages']]
@@ -611,13 +740,26 @@ function App() {
       const currentTool = allTools.find((tool) => tool.id === currentView.toolId)
       items = [{ id: 'open-pdf', label: 'Choose a PDF…', icon: 'upload', type: 'open' }, ...(currentTool ? [{ id: 'repeat-tool', label: `Restart ${currentTool.name}`, icon: 'redo', type: 'tool', toolId: currentTool.id }] : [])]
     }
-    if (!items.length) return
+    const viewLabel = currentView.type === 'tool'
+      ? (allTools.find((tool) => tool.id === currentView.toolId)?.name || 'Tool')
+      : ({ home: 'Home', recent: 'Recent files', settings: 'Settings', category: 'Tools' }[currentView.type] || 'Workspace')
+    const surface = target.closest('.acrobat-document-page') ? `PDF page ${target.closest('.acrobat-document-page').dataset.pageNumber || ''}`.trim()
+      : target.closest('.sidebar') ? 'Sidebar'
+        : target.closest('.tabs-bar') ? 'Workspace tabs'
+          : target.closest('.topbar') ? 'Top bar'
+            : target.closest('.settings-page, .settings-redesign') ? 'Settings panel'
+              : target.closest('.tool-card') ? 'Tool list'
+                : target.closest('[data-pdf-id]') ? 'Recent file item'
+                  : 'Workspace'
+    if (items.length && !items.at(-1)?.separator) items.push({ separator: true })
+    items.push({ id: 'report-bug', label: 'Report a bug', icon: 'bug', type: 'report-bug', context: `${viewLabel} · ${surface}` })
     setContextMenu({ x: Math.min(event.clientX, window.innerWidth - 290), y: Math.min(event.clientY, window.innerHeight - Math.min(items.length * 38, 430)), items })
   }
 
   const handleContextAction = async (item) => {
     setContextMenu(null)
     setActionError('')
+    if (item.type === 'report-bug') { setBugReportContext(item.context); return }
     if (item.type === 'edit-text') { setEditTextRequest((request) => request + 1); return }
     if (item.type === 'editor-tool') { editorRef.current?.activateTool?.(item.toolId); return }
     if (item.type === 'theme') { handleSelectTheme(item.themeId); return }
@@ -644,6 +786,13 @@ function App() {
     else if (item.type === 'tool-card') item.element?.click()
     else if (item.type === 'tool') handlePaletteNavigate({ type: 'tool', toolId: item.toolId || item.id, files })
   }
+
+  useEffect(() => window.pdfKing?.onRequestBugReport?.((payload) => {
+    const viewLabel = currentView.type === 'tool'
+      ? (allTools.find((tool) => tool.id === currentView.toolId)?.name || 'Tool')
+      : ({ home: 'Home', recent: 'Recent files', settings: 'Settings', category: 'Tools' }[currentView.type] || 'Workspace')
+    setBugReportContext(`${viewLabel} · ${payload?.context || 'Text field or selected text'}`)
+  }), [currentView])
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -703,10 +852,13 @@ function App() {
   }
 
   const handleToggleTheme = () => {
-    handleSelectTheme(pairedTheme(theme))
+    const nextTheme = autoTheme
+      ? (isLightTheme(theme) ? selectedDarkTheme : selectedLightTheme)
+      : pairedTheme(theme)
+    handleSelectTheme(nextTheme)
   }
 
-  const handleFinishOnboarding = ({ name, theme: chosenTheme, matchSystem, keepRecent }) => {
+  const handleFinishOnboarding = async ({ name, theme: chosenTheme, matchSystem, keepRecent, installCli }) => {
     const displayName = name.trim() || 'User'
     const darkTheme = isLightTheme(chosenTheme) ? pairedTheme(chosenTheme) : chosenTheme
     const lightTheme = pairedTheme(darkTheme)
@@ -721,6 +873,7 @@ function App() {
     window.localStorage.setItem('pdf-king-auto-theme', String(matchSystem))
     window.localStorage.setItem('pdfking-keep-recent', String(keepRecent))
     window.localStorage.setItem('pdfking-onboarding-complete', 'true')
+    if (installCli) await window.pdfKing?.installCli?.()
     if (matchSystem) {
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? darkTheme : lightTheme
       setTheme(systemTheme)
@@ -740,19 +893,14 @@ function App() {
       if (editing && e.key !== 'Escape' && !e.metaKey && !e.ctrlKey) return
       const modalOpen = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].some((dialog) => dialog.getClientRects().length)
       if (modalOpen) return
+      const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
       for (const [action, cfg] of Object.entries(shortcuts)) {
-        if (!cfg.key) continue
-        const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
-        const universalModifier = cfg.metaKey && cfg.ctrlKey
-        const modifierMatch = universalModifier
-          ? (isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey)
-          : cfg.metaKey
-            ? e.metaKey && !e.ctrlKey
-            : cfg.ctrlKey
-              ? e.ctrlKey && !e.metaKey
-              : !e.metaKey && !e.ctrlKey
-        const match = modifierMatch && (!!cfg.altKey === e.altKey) && (!!cfg.shiftKey === e.shiftKey) && cfg.key.toLowerCase() === e.key.toLowerCase()
-        if (match) {
+        if (!matchesShortcut(e, cfg, isMac)) continue
+        {
+          const pdfEditorAction = action === 'save-as' || action === 'print-document' || action === 'toggle-right-sidebar' || action === 'focus-editor-search' || action.startsWith('editor-')
+          if (pdfEditorAction && (currentView.type !== 'tool' || currentView.toolId !== 'pdf-editor')) continue
+          const pageOrZoomAction = action.startsWith('editor-page-') || action.startsWith('editor-zoom-')
+          if (pageOrZoomAction && !(target instanceof HTMLElement && target.closest('.pdf-editor-workspace'))) continue
           e.preventDefault()
           e.stopPropagation()
           if (action === 'search') setIsSearchOpen((isOpen) => {
@@ -783,11 +931,25 @@ function App() {
           if (action === 'navigate-editor') handlePaletteNavigate({ type: 'tool', toolId: 'pdf-editor' })
           if (action === 'new-tab') createTab()
           if (action === 'close-tab') closeTab(activeTabId)
+          if (action === 'next-tab' || action === 'previous-tab') {
+            const index = tabs.findIndex((tab) => tab.id === activeTabIdRef.current)
+            const direction = action === 'next-tab' ? 1 : -1
+            if (tabs.length > 1) {
+              const nextIndex = (index + direction + tabs.length) % tabs.length
+              selectTab(tabs[nextIndex])
+            } else {
+              window.pdfKing?.switchWindow?.(direction)
+            }
+          }
           if (action === 'close-window') {
             handleCloseWindow()
           }
           if (action === 'toggle-sidebar') setSidebarCollapsed(c => !c)
           if (action === 'toggle-theme') handleToggleTheme()
+          if (action === 'save-as') {
+            if (editorRef.current?.saveAs) void editorRef.current.saveAs()
+            else document.querySelector('.output-row .browse-button:not(:disabled), .editor-save-button:not(:disabled)')?.click()
+          }
           if (action === 'print-document') {
             if (currentView.type === 'tool' && currentView.toolId === 'pdf-editor') void editorRef.current?.printPdf?.()
             else document.querySelector('.pdf-editor-workspace .editor-open-button[aria-label="Print PDF"]')?.click()
@@ -800,17 +962,6 @@ function App() {
             saveButton?.click()
           }
           break
-        }
-      }
-      if (e.key === 'Tab' && e.ctrlKey && !e.metaKey) {
-        e.preventDefault()
-        const index = tabs.findIndex((tab) => tab.id === activeTabIdRef.current)
-        const direction = e.shiftKey ? -1 : 1
-        if (tabs.length > 1) {
-          const nextIndex = (index + direction + tabs.length) % tabs.length
-          selectTab(tabs[nextIndex])
-        } else {
-          window.pdfKing?.switchWindow?.(direction)
         }
       }
       if (e.key === 'a' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
@@ -840,15 +991,14 @@ function App() {
   }, [currentView, activeTabId, isNewDocumentOpen, isSearchOpen, contextMenu, tabs, showOnboarding, theme])
 
   return (
-    <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${phoneLayout ? 'phone-layout' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible && !phoneLayout ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
+    <div className={`app-shell ${currentView.type !== 'home' ? 'theme-font-scope' : ''} ${isLightTheme(theme) ? 'light-theme' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${phoneLayout ? 'phone-layout' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''} ${isFullPdfEditor ? 'full-pdf-editor-mode' : ''} ${isFullPdfEditor && !editorChromeVisible && !phoneLayout ? 'editor-chrome-hidden' : ''}`} data-theme={theme} data-platform={window.pdfKing?.platform || 'web'} onContextMenu={handleWorkspaceContextMenu} style={{ '--logo-accent': themeBrandAccent(logoTheme) }}>
       <a className="skip-link" href={`#workspace-panel-${activeTabId}`}>Skip to workspace</a>
       <TabBar tabs={tabs} activeTabId={activeTabId} dirtyTabIds={dirtyTabIds} onSelectTab={selectTab} onCloseTab={closeTab} onNewTab={createTab} getTitle={getTabTitle} onStartTabDrag={startTabDrag} onCancelTabDrag={cancelTabDrag} onReorderTab={reorderTab} onImportTab={importTabFromWindow} />
-      <div className="tabs-spacer" style={{ height: '8px', background: 'transparent' }} />
       <div className="workspace-shell">
         {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
         <Sidebar currentView={currentView} onNavigate={handleNavigate} onOpenNewDocument={handleOpenNewDocument} onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)} collapsed={sidebarCollapsed} theme={theme} userName={userName} phoneLayout={phoneLayout} onCloseMobileNav={() => setMobileNavOpen(false)} />
 
-      <main className="main-area" id={`workspace-panel-${activeTabId}`} tabIndex={-1} role="tabpanel" aria-labelledby={`workspace-tab-${activeTabId}`} onContextMenu={handleWorkspaceContextMenu}>
+      <main className="main-area" id={`workspace-panel-${activeTabId}`} tabIndex={-1} role="tabpanel" aria-labelledby={`workspace-tab-${activeTabId}`}>
         <Topbar
           currentView={currentView}
           onNavigate={handlePaletteNavigate}
@@ -917,6 +1067,7 @@ function App() {
       </div>
 
       <WorkspaceContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} onAction={handleContextAction} />
+      {bugReportContext && <BugReportDialog context={bugReportContext} onClose={() => setBugReportContext(null)} />}
       {!updateDismissed && <UpdateDialog
         state={updateState}
         onDownload={() => window.pdfKing?.updateDownload?.().catch((error) => setUpdateState((current) => ({ ...current, status: 'error', error: error.message })))}

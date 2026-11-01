@@ -1,0 +1,104 @@
+
+> pdf-dock-desktop@0.1.0-beta.5 test
+> node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-simple-text-safety.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-keyboard-shortcuts.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs && node scripts/test-updater.mjs
+
+Saved PDF; recent history update failed. Error: Simulated history failure
+    at recordRecent (file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/scripts/test-editor.mjs:264:13)
+    at writeEditorDocument (file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/src/editor/save.js:24:25)
+    at async file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/scripts/test-editor.mjs:258:13
+Saved PDF; recent history update failed. Error: Simulated history failure
+    at recordRecent (file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/scripts/test-editor.mjs:264:13)
+    at writeEditorDocument (file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/src/editor/save.js:24:25)
+    at async file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/scripts/test-editor.mjs:258:13
+Saved PDF; recent history update failed. Error: Simulated history failure
+    at recordRecent (file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/scripts/test-editor.mjs:264:13)
+    at writeEditorDocument (file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/src/editor/save.js:24:25)
+    at async file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/scripts/test-editor.mjs:258:13
+Editor regression checks passed: composition, Unicode, forms, reorder/delete/duplicate/rotate/crop/blank, coordinate matrices, deletion, OCR text extraction, history budget, save modes and atomic replacement.
+Rich text regressions passed: overlapping styles, inherited typing, replacement, PDF font/size/color preservation.
+Layout regressions passed: original line breaks and neighboring table pixels are preserved.
+Source color regression passed: original green citations and blue superscripts are retained exactly.
+Font mapping and character spacing regressions passed.
+PASS simple text safety: unsafe guard propagates, unsupported fonts and ToUnicode codes stay, mixed Tj/TJ runs remove exactly, TJ neighbours and spacing survive, split /Contents state is shared, inline images fall back.
+Recent-file IPC checks passed: concurrent updates, atomic index, stable path identity, missing files, removal and renderer trust.
+(node:48228) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/src/pdfToWord.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/udbhavp/Desktop/My Work/Tools/PDF Tools/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48228) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+PDF-to-Word regression checks passed: borderless/ruled tables, wrapped cells, empty columns, nested lists, heading sizes, fonts, mixed colors, crop coordinates and centering.
+(node:48233) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/src/pdfCompression.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/udbhavp/Desktop/My Work/Tools/PDF Tools/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Text-only PDF with repeated embedded fonts: 1872130 -> 309020 bytes (83.5% smaller); all 6 pages of text retained
+Uncompressed text-only PDF: 3796324 -> 309023 bytes
+jpeg/light: 4461800 -> 1078177 bytes (75.8% smaller); text, links and form retained
+jpeg/recommended: 4461800 -> 294542 bytes (93.4% smaller); text, links and form retained
+jpeg/extreme: 4461800 -> 95501 bytes (97.9% smaller); text, links and form retained
+png/light: 3364537 -> 1070896 bytes (68.2% smaller); text, links and form retained
+png/recommended: 3364537 -> 292312 bytes (91.3% smaller); text, links and form retained
+png/extreme: 3364537 -> 95081 bytes (97.2% smaller); text, links and form retained
+Compact text PDF: 854 -> 854 bytes; no rasterization
+Adaptive compression: stops at 70% target; retains smallest output when target is unattainable
+TIFF and PNG scan predictors (RGB and grayscale): exact pixel reconstruction verified
+Transparent image: color compressed; alpha bytes and original pixel grid preserved
+Unattainable 70% target: all 6 pages retain selectable/searchable text; no page rasterization
+Renderer image compression: transparency preserved; image and opacity mask scaled together
+Interactive forms skip font subsetting; negligible byte savings do not claim 0.0% compression
+Warning: Please use the `legacy` build in Node.js environments.
+Page numbering: subsets start at "First page number" and advance one per numbered page; skipped pages stay blank; {total} counts source pages; startAt still honored; watermark unchanged
+(node:48245) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/udbhavp/Desktop/My%20Work/Tools/PDF%20Tools/src/keyboardShortcuts.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/udbhavp/Desktop/My Work/Tools/PDF Tools/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS keyboard shortcuts: 30 labelled actions, unique defaults, platform-aware matching, conflict replacement, persistence.
+  ok   a new image is painted exactly inside its rect
+  ok   the painted image is upright (the source top-left stays on top)
+  ok   the painted image matches the placement matrix
+  ok   crop {left:25} shows only the right 75% of the source
+  ok   the cropped image matches the placement matrix
+  ok   rotation 90 turns the image about the centre of the rect
+  ok   rotation 90 turns the image clockwise
+  ok   the rotated image matches the placement matrix
+  ok   flipHorizontal mirrors the image inside the rect
+  ok   the flipped image matches the placement matrix
+  ok   skew 20 shears the image horizontally
+  ok   the skewed image matches the placement matrix
+  ok   an existing image is covered with the background colour
+  ok   the replacement image is painted at the new rect
+  ok   a deleted image leaves the covered area blank
+       unit square corners in frame points: [[60,400],[300,400],[60,640],[300,640]]
+  ok   imagePlacement maps the unit square onto the rect
+  ok   duplicateImage returns a new placement that never covers the source
+  ok   a duplicate does not paint a second cover over the source artwork
+  ok   a 90 degree rotation keeps the image shape on a non-square page
+  ok   an image used on two pages is delivered under a shared id
+  ok   the page object store never resolves a shared image id
+  ok   the shared object store resolves the image
+  ok   the captured artwork keeps the source pixels
+  ok   a captured image is painted at its new rect
+  ok   the area the captured image came from is covered
+  ok   the image objects receive the declared delete and duplicate props
+  ok   the source capture reads a shared image from the shared store
+  ok   the capture and the image regions share one capture placement
+  ok   the capture of an image turned by 0 degrees shows the picture as the page does
+  ok   the capture of an image turned by 90 degrees shows the picture as the page does
+
+PASS image editing pipeline (30 checks)
+image editor regressions
+  ok   a viewer rotation of 0 and of 90 save the same image in the same place
+  ok   the viewer rotation is not baked into the orientation of the saved image
+  ok   the cover of the replaced artwork stays on the page with a rotated viewer
+  ok   a double click opens the inspector and never transforms the image
+  ok   a double click does not read the artwork that is already loaded
+
+All 5 checks passed.
+
+> pdf-dock-desktop@0.1.0-beta.5 test:repairs
+> node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs
+
+Created five-page text/image/form, rotated crop, rotated source image and scanned OCR fixtures.
+PASS repair regressions: 80 rotated/cropped/zoom frames, revision fences/save race, constrained text removal/visual fallback/overflow, custom-font, custom-encoding and multiline source erasure, background-preserving fallback, five interactive field kinds, widget geometry/rename/delete, affine image placement.
+PASS renderer origin: encoded spaces/Unicode, dist boundary/traversal, remote file host, exact dev origin.
+Updater checks passed: beta configuration, update prompt state, progress, install handoff, skipped-version persistence, and macOS manual-installer fallback.

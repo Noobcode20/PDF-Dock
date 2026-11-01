@@ -1,21 +1,28 @@
 import React, { useState } from 'react'
+import { GITHUB_CLIENT_ID } from '../feedbackReporting'
 import { Icon } from '../icons'
 import { THEMES, isLightTheme } from '../themes'
 import { Presence } from './Presence'
 
-const STEPS = ['Your name', 'Appearance', 'A few preferences']
+const STEPS = ['Your name', 'Appearance', 'Setup']
 
 export function Onboarding({ isOpen = true, theme, onSelectTheme, onFinish }) {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
   const [matchSystem, setMatchSystem] = useState(false)
   const [keepRecent, setKeepRecent] = useState(true)
+  const [connectGithub, setConnectGithub] = useState(false)
+  const [githubBusy, setGithubBusy] = useState(false)
+  const [setupError, setSetupError] = useState('')
+  const [installCli, setInstallCli] = useState(false)
 
   const finish = (skip = false) => onFinish({
     name: skip ? '' : name,
     theme,
     matchSystem: skip ? false : matchSystem,
     keepRecent: skip ? true : keepRecent,
+    connectGithub: skip ? false : connectGithub,
+    installCli: skip ? false : installCli,
   })
 
   return (
@@ -131,9 +138,12 @@ export function Onboarding({ isOpen = true, theme, onSelectTheme, onFinish }) {
               <div className="onboarding-preferences-step">
                 <span className="onboarding-step-icon"><Icon name="sliders" size={19} /></span>
                 <div className="onboarding-step-heading">
-                  <h2>Make it work your way</h2>
-                  <p>These are optional. You can change them later in Settings.</p>
+                  <h2>Connect your tools</h2>
+                  <p>Choose optional setup. You can change your mind later.</p>
                 </div>
+                <div className="onboarding-preference"><span className="onboarding-preference-icon"><Icon name="github" size={17} /></span><span className="onboarding-preference-copy"><strong>Connect GitHub for bug reports</strong><small>{connectGithub ? 'GitHub account connected.' : 'Optional. Authorize PDF Dock to submit bug reports.'}</small></span><button type="button" disabled={githubBusy || !GITHUB_CLIENT_ID} onClick={async () => { setGithubBusy(true); setSetupError(''); try { const s = await window.pdfKing.githubStartDeviceAuth(GITHUB_CLIENT_ID); await window.pdfKing.openExternal(s.verificationUri); const end = Date.now() + s.expiresIn * 1000; while (Date.now() < end) { await new Promise(r => setTimeout(r, s.interval * 1000)); const result = await window.pdfKing.githubPollDeviceAuth(s.sessionId); if (result.status === 'connected') { setConnectGithub(true); break } } } catch (e) { setSetupError(e.message) } finally { setGithubBusy(false) } }}>{githubBusy ? 'Waiting…' : connectGithub ? 'Connected' : 'Connect'}</button></div>
+                <label className="onboarding-preference"><span className="onboarding-preference-icon"><Icon name="terminal" size={17} /></span><span className="onboarding-preference-copy"><strong>Install the command-line tools</strong><small>Install the CLI and its PDF Dock skill for compatible AI agents on this computer.</small></span><input type="checkbox" checked={installCli} onChange={e => setInstallCli(e.target.checked)} /><span className="onboarding-checkbox" /></label>
+                {setupError && <p role="alert">{setupError}</p>}
                 <label className="onboarding-preference">
                   <span className="onboarding-preference-icon"><Icon name="sun" size={17} /></span>
                   <span className="onboarding-preference-copy"><strong>Follow my device appearance</strong><small>Switch between your chosen light and dark palettes with your system.</small></span>

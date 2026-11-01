@@ -1,4 +1,5 @@
 import React from "react";
+import { ThemedSelect } from "../components/ThemedSelect";
 export function FormCandidatesPanel({ candidates, onChange, onAccept }) {
   if (!candidates.length) return null;
   return (
@@ -11,15 +12,12 @@ export function FormCandidatesPanel({ candidates, onChange, onAccept }) {
             value={candidate.name}
             onChange={(e) => onChange(index, { name: e.target.value })}
           />
-          <select
-            aria-label={`Field ${index + 1} type`}
+          <ThemedSelect
+            ariaLabel={`Field ${index + 1} type`}
             value={candidate.kind}
             onChange={(e) => onChange(index, { kind: e.target.value })}
-          >
-            <option value="text">Text</option>
-            <option value="checkbox">Checkbox</option>
-            <option value="dropdown">Dropdown</option>
-          </select>
+            options={[{ value: 'text', label: 'Text' }, { value: 'checkbox', label: 'Checkbox' }, { value: 'dropdown', label: 'Dropdown' }]}
+          />
           {["x", "y", "width", "height"].map((key) => (
             <label key={key}>
               {key}

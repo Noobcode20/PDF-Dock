@@ -111,7 +111,7 @@ export function CommandPalette({ isOpen, onClose, onSelectTool, onNavigate, onNe
             }}
           />
           <button className="palette-close-btn" type="button" onClick={onClose} aria-label="Close search">
-            <kbd>Esc</kbd>
+            <Icon name="x" size={16} />
           </button>
         </div>
 

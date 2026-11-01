@@ -1,0 +1,11 @@
+name = "pdf-dock-issue-intake"
+main = "src/index.mjs"
+compatibility_date = "2026-10-24"
+
+[secrets]
+required = ["GITHUB_APP_ID", "GITHUB_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"]
+
+[[kv_namespaces]]
+binding = "REPORT_LIMITS"
+id = "3e5f185cf2dd49fa9c03e30b059fb635"
+

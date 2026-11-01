@@ -33,8 +33,9 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
   const showFlyout = (category, anchor) => {
     cancelFlyoutClose()
     const rect = anchor.getBoundingClientRect()
-    const left = Math.min(rect.right + 10, Math.max(8, window.innerWidth - 568))
-    const width = Math.max(280, Math.min(560, window.innerWidth - left - 8))
+    const preferredWidth = 304
+    const left = Math.max(8, Math.min(rect.right + 10, window.innerWidth - preferredWidth - 8))
+    const width = Math.min(preferredWidth, window.innerWidth - left - 8)
     const height = Math.min(window.innerHeight * 0.72, Math.max(150, allTools.filter((tool) => tool.category === category.id).length * 52 + 74))
     setFlyout({ categoryId: category.id, left, top: Math.max(8, Math.min(rect.top - 18, window.innerHeight - height - 8)), width })
   }
@@ -68,7 +69,6 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
       <button className="new-document" type="button" aria-label="New document" title={isCollapsed ? 'New document' : undefined} onClick={() => { onOpenNewDocument(); onCloseMobileNav?.() }}>
         <span className="new-document-icon"><Icon name="plus" size={20} /></span>
         <span className="new-document-label">New document</span>
-        {!isCollapsed && <Icon name="arrow" size={16} className="new-document-arrow" />}
       </button>
 
       <nav className="sidebar-navigation" aria-label="Workspace navigation">
@@ -125,13 +125,13 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
       <section
         className="sidebar-flyout"
         data-theme={theme}
-        style={{ left: flyout.left, top: flyout.top, width: Math.max(280, flyout.width) }}
+        style={{ left: flyout.left, top: flyout.top, width: flyout.width }}
         aria-label={`${flyoutCategory.label} tools`}
         onMouseEnter={cancelFlyoutClose}
         onMouseLeave={deferFlyoutClose}
         onFocus={cancelFlyoutClose}
       >
-        <header className="sidebar-flyout-header"><h2>{flyoutCategory.label}</h2><button type="button" aria-label="Close tools menu" onClick={() => setFlyout(null)}><Icon name="x" size={18} /></button></header>
+        <header className="sidebar-flyout-header"><h2>{flyoutCategory.label}</h2></header>
         <div className="sidebar-flyout-list">{renderToolList(flyoutCategory, true)}</div>
       </section>, document.body
     )}

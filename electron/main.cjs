@@ -1,13 +1,126 @@
 const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, Menu } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { createUpdateController } = require('./updateController.cjs')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
 const os = require('node:os')
+const { execFile } = require('node:child_process')
+const { promisify } = require('node:util')
+const githubTokenFile = () => path.join(app.getPath('userData'), 'github-feedback-token.enc')
+const githubAuthSessions = new Map()
+const isCliRun = process.argv.includes('--pdf-dock-cli')
+ipcMain.handle('pdfking:install-cli', async () => {
+  const root = path.join(app.getPath('userData'), 'cli')
+  await fs.mkdir(root, { recursive: true })
+  const cliSource = app.isPackaged ? path.join(process.resourcesPath, 'cli', 'pdf-dock.mjs') : path.join(__dirname, '..', 'bin', 'pdf-dock.mjs')
+  const cliTarget = path.join(root, 'pdf-dock.mjs')
+  await fs.copyFile(cliSource, cliTarget)
+  const skillSource = app.isPackaged ? path.join(process.resourcesPath, 'cli', 'SKILL.md') : path.join(__dirname, '..', 'skills', 'pdf-dock', 'SKILL.md')
+  const skillTarget = path.join(os.homedir(), '.agents', 'skills', 'pdf-dock', 'SKILL.md')
+  await fs.mkdir(path.dirname(skillTarget), { recursive: true })
+  await fs.copyFile(skillSource, skillTarget)
+  const launcher = path.join(root, process.platform === 'win32' ? 'pdf-dock.cmd' : 'pdf-dock')
+  const content = process.platform === 'win32' ? `@echo off\r\n"${process.execPath}" "${cliTarget}" %*\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${cliTarget}" "$@"\n`
+  await fs.writeFile(launcher, content, { mode: 0o755 })
+  return { launcher, skill: skillTarget }
+})
+let cliRequest = null
+if (isCliRun) {
+  try { cliRequest = JSON.parse(process.env.PDF_DOCK_CLI_REQUEST || '{}') }
+  catch { cliRequest = { command: 'invalid-request' } }
+}
+
+async function readGithubToken() {
+  if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
+  const encrypted = await fs.readFile(githubTokenFile())
+  const decrypted = await safeStorage.decryptStringAsync(encrypted)
+  if (decrypted.shouldReEncrypt) await atomicWrite(githubTokenFile(), await safeStorage.encryptStringAsync(decrypted.result))
+  return decrypted.result
+}
+
+async function githubRequest(url, token, options = {}) {
+  const response = await fetch(url, { ...options, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', ...(options.headers || {}) } })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.message || `GitHub request failed (HTTP ${response.status}).`)
+  return payload
+}
+
+ipcMain.handle('pdfking:github-start-device-auth', async (_event, clientId) => {
+  if (typeof clientId !== 'string' || !/^[A-Za-z0-9]{20}$/.test(clientId)) throw new Error('The GitHub OAuth app client ID is invalid.')
+  if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
+  const response = await fetch('https://github.com/login/device/code', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: clientId, scope: 'public_repo' }) })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || !payload.device_code || !payload.user_code) throw new Error(payload.error_description || 'GitHub device authorization could not start.')
+  const sessionId = crypto.randomUUID()
+  githubAuthSessions.set(sessionId, { clientId, deviceCode: payload.device_code, interval: Math.max(Number(payload.interval) || 5, 5), expiresAt: Date.now() + (Number(payload.expires_in) || 900) * 1000 })
+  return { sessionId, userCode: payload.user_code, verificationUri: payload.verification_uri, interval: Math.max(Number(payload.interval) || 5, 5), expiresIn: Number(payload.expires_in) || 900 }
+})
+
+ipcMain.handle('pdfking:github-poll-device-auth', async (_event, sessionId) => {
+  const session = githubAuthSessions.get(sessionId)
+  if (!session) throw new Error('GitHub authorization session has expired. Start again to get a new code.')
+  if (Date.now() >= session.expiresAt) { githubAuthSessions.delete(sessionId); throw new Error('GitHub authorization expired. Start again to get a new code.') }
+  const response = await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: session.clientId, device_code: session.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }) })
+  const payload = await response.json().catch(() => ({}))
+  if (payload.error === 'authorization_pending') return { status: 'pending', interval: session.interval }
+  if (payload.error === 'slow_down') { session.interval += 5; return { status: 'pending', interval: session.interval } }
+  if (!response.ok || !payload.access_token) { githubAuthSessions.delete(sessionId); throw new Error(payload.error_description || payload.error || 'GitHub authorization failed.') }
+  githubAuthSessions.delete(sessionId)
+  if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
+  await fs.mkdir(app.getPath('userData'), { recursive: true })
+  await atomicWrite(githubTokenFile(), await safeStorage.encryptStringAsync(payload.access_token))
+  const user = await githubRequest('https://api.github.com/user', payload.access_token)
+  return { status: 'connected', account: { login: user.login, url: user.html_url } }
+})
+
+ipcMain.handle('pdfking:github-get-account', async () => {
+  try {
+    const token = await readGithubToken()
+    const user = await githubRequest('https://api.github.com/user', token)
+    return { login: user.login, url: user.html_url }
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    if (/Bad credentials|token expired|401/i.test(error.message)) await fs.rm(githubTokenFile(), { force: true }).catch(() => {})
+    throw error
+  }
+})
+
+ipcMain.handle('pdfking:github-clear-token', async () => { await fs.rm(githubTokenFile(), { force: true }); return true })
+
+ipcMain.handle('pdfking:github-create-issue', async (_event, payload) => {
+  const repository = String(payload?.repository || '')
+  const title = String(payload?.title || '').trim()
+  const body = String(payload?.body || '').trim()
+  if (repository !== 'Noobcode20/PDF-Dock') throw new Error('The configured GitHub repository is invalid.')
+  if (title.length < 4 || title.length > 256 || body.length < 10 || body.length > 60000) throw new Error('Add a valid issue title and description.')
+  const token = await readGithubToken()
+  const issue = await githubRequest(`https://api.github.com/repos/${repository}/issues`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body }) })
+  return { ok: true, url: issue.html_url, number: issue.number }
+})
+
+ipcMain.handle('pdfking:github-create-proxy-issue', async (_event, proxyUrl, payload) => {
+  try {
+    const endpoint = new URL(String(proxyUrl || ''))
+    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) throw new Error('The bug reporting service URL is invalid. Update the app configuration and rebuild.')
+    const response = await fetch(endpoint.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result.url) throw new Error(result.error || `GitHub could not create the issue (HTTP ${response.status}).`)
+    return result
+  } catch (error) {
+    if (error?.message === 'Failed to fetch' || error?.name === 'TypeError') {
+      throw new Error('Could not connect to the bug reporting service. Check your internet connection and try again.')
+    }
+    throw error
+  }
+})
 
 const recentDirectory = () => path.join(app.getPath('userData'), 'recent-files')
 const recentIndex = () => path.join(recentDirectory(), 'index.json')
@@ -74,6 +187,27 @@ const systemFontPaths = {
   },
 }
 const tabDrags = new Map()
+let pendingPdfPaths = []
+let mainWindow = null
+let rendererReady = false
+function queuePdfPath(value) {
+  const filePath = typeof value === 'string' && path.isAbsolute(value) && /\.pdf$/i.test(value) ? value : null
+  if (!filePath) return
+  if (mainWindow && !mainWindow.isDestroyed() && rendererReady && !mainWindow.webContents.isLoading()) mainWindow.webContents.send('pdfking:open-file', filePath)
+  else pendingPdfPaths.push(filePath)
+}
+const initialPdfPaths = process.argv.slice(app.isPackaged ? 1 : 2).filter((value) => /^\//.test(value) && /\.pdf$/i.test(value))
+pendingPdfPaths.push(...initialPdfPaths)
+const hasSingleInstanceLock = isCliRun || app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) app.quit()
+else {
+  app.on('second-instance', (_event, argv) => {
+    const filePath = argv.find((value) => /^\//.test(value) && /\.pdf$/i.test(value))
+    if (filePath) queuePdfPath(filePath)
+    if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus() }
+  })
+  app.on('open-file', (event, filePath) => { event.preventDefault(); queuePdfPath(filePath) })
+}
 let recentQueue = Promise.resolve()
 const originalHandle = ipcMain.handle.bind(ipcMain)
 function trustedRendererFrame(frame) {
@@ -94,6 +228,7 @@ const updateController = createUpdateController({
   },
 })
 ipcMain.handle('pdfking:update-get-state', () => updateController.getState())
+ipcMain.handle('pdfking:app-version', () => app.getVersion())
 ipcMain.handle('pdfking:update-check', () => updateController.check())
 ipcMain.handle('pdfking:update-download', () => updateController.download())
 ipcMain.handle('pdfking:update-install', () => updateController.install())
@@ -221,6 +356,17 @@ ipcMain.handle('pdfking:open-pdf', async () => {
   const data = await fs.readFile(filePath)
   return { name: path.basename(filePath), data, filePath }
 })
+ipcMain.handle('pdfking:renderer-ready', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window || window !== mainWindow) return false
+  rendererReady = true
+  for (const filePath of pendingPdfPaths.splice(0)) window.webContents.send('pdfking:open-file', filePath)
+  return true
+})
+ipcMain.handle('pdfking:read-opened-pdf', async (_event, filePath) => {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || !/\.pdf$/i.test(filePath)) throw new Error('Invalid PDF path.')
+  return { name: path.basename(filePath), data: await fs.readFile(filePath), filePath }
+})
 
 ipcMain.handle('pdfking:convert-type1-fonts', async (_event, data) => convertType1Fonts(data))
 
@@ -235,6 +381,66 @@ ipcMain.handle('pdfking:read-system-font', async (_event, face) => {
     try { return new Uint8Array(await fs.readFile(filePath)) } catch { /* Try the next system font location. */ }
   }
   return null
+})
+
+ipcMain.handle('pdfking:cli-get-request', async () => {
+  if (!isCliRun || !cliRequest) throw new Error('No CLI operation is active.')
+  const inputPaths = cliRequest.command === 'create' || cliRequest.command === 'tools'
+    ? []
+    : ['run', 'edit'].includes(cliRequest.command)
+      ? (Array.isArray(cliRequest.files) ? cliRequest.files : [])
+      : [cliRequest.file].filter(Boolean)
+  if (inputPaths.length > 20) throw new Error('Choose no more than 20 input files per operation.')
+  const files = await Promise.all(inputPaths.map(async (filePath) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('Input files must be non-empty paths.')
+    const absolutePath = path.resolve(process.cwd(), filePath)
+    const [data, stat] = await Promise.all([fs.readFile(absolutePath), fs.stat(absolutePath)])
+    return { name: path.basename(absolutePath), path: absolutePath, lastModified: Math.floor(stat.mtimeMs), data: new Uint8Array(data) }
+  }))
+  if (files.reduce((sum, file) => sum + file.data.byteLength, 0) > 1024 * 1024 * 1024) throw new Error('Input files total more than 1 GB.')
+  return { ...cliRequest, files }
+})
+
+ipcMain.handle('pdfking:cli-progress', (_event, state) => {
+  if (!isCliRun || !cliRequest?.progress) return false
+  process.stderr.write(`${JSON.stringify({ event: 'progress', ...state })}\n`)
+  return true
+})
+
+ipcMain.handle('pdfking:cli-result', async (_event, result) => {
+  if (!isCliRun) throw new Error('No CLI operation is active.')
+  try {
+    if (!result || result.ok !== true) throw new Error(result?.error || 'The PDF operation failed.')
+    const outputs = Array.isArray(result.outputs) ? result.outputs : []
+    const requestedOutput = cliRequest.output ? path.resolve(process.cwd(), cliRequest.output) : null
+    if (requestedOutput && outputs.length > 1 && path.extname(requestedOutput)) throw new Error('This operation creates multiple files; set output to a directory, not a filename.')
+    const outputDirectory = requestedOutput
+      ? (outputs.length === 1 && path.extname(requestedOutput) ? path.dirname(requestedOutput) : requestedOutput)
+      : process.cwd()
+    if (outputs.length) await fs.mkdir(outputDirectory, { recursive: true })
+    const saved = []
+    for (const item of outputs) {
+      if (!item || typeof item.name !== 'string' || !item.data) throw new Error('PDF Dock returned an invalid output file.')
+      const targetPath = requestedOutput && outputs.length === 1 && path.extname(requestedOutput)
+        ? requestedOutput
+        : path.join(outputDirectory, path.basename(item.name))
+      if (!cliRequest.force) {
+        try { await fs.access(targetPath); throw new Error(`Output already exists: ${targetPath}. Set "force": true to replace it.`) }
+        catch (error) { if (error.code !== 'ENOENT') throw error }
+      }
+      const bytes = Buffer.from(item.data)
+      await atomicWrite(targetPath, bytes)
+      saved.push({ path: targetPath, name: path.basename(targetPath), size: bytes.byteLength, mimeType: item.mimeType || 'application/pdf' })
+    }
+    const response = { ok: true, command: cliRequest.command, ...(result.data !== undefined ? { data: result.data } : {}), ...(result.message ? { message: result.message } : {}), outputs: saved }
+    await new Promise((resolve) => process.stdout.write(`${JSON.stringify(response)}\n`, resolve))
+    setImmediate(() => app.quit())
+    return true
+  } catch (error) {
+    await new Promise((resolve) => process.stdout.write(`${JSON.stringify({ ok: false, error: error.message || String(error), outputs: [] })}\n`, resolve))
+    setImmediate(() => app.exit(1))
+    return false
+  }
 })
 
 ipcMain.handle('pdfking:add-recent-file', async (_event, { name, data, pages, sourcePath }) => serializeRecentUpdate(async () => {
@@ -363,6 +569,7 @@ function createWindow() {
     height: 920,
     minWidth: 1024,
     minHeight: 680,
+    show: !isCliRun,
     backgroundColor: '#17171b',
     title: 'PDF Dock',
     ...(process.platform === 'darwin' ? {
@@ -374,10 +581,14 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
+      ...(isCliRun ? { additionalArguments: ['--pdf-dock-cli'] } : {}),
     },
   })
+  mainWindow = window
+  rendererReady = false
 
   window.on('close', (event) => {
+    if (isCliRun) return
     if (window.__pdfKingCloseAllowed) { clearTimeout(window.__pdfKingCloseFallback); return }
     event.preventDefault()
     if (window.__pdfKingClosePending) return
@@ -386,6 +597,32 @@ function createWindow() {
   })
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  if (isCliRun) {
+    window.webContents.on('did-fail-load', (_event, code, description, url) => {
+      process.stderr.write(`renderer load failed: ${description} (${code}) ${url}\n`)
+    })
+  }
+  window.webContents.on('context-menu', (event, params) => {
+    event.preventDefault()
+    const template = []
+    if (params.isEditable) {
+      const editFlags = params.editFlags || {}
+      template.push(
+        { role: 'undo', enabled: !!editFlags.canUndo },
+        { role: 'redo', enabled: !!editFlags.canRedo },
+        { type: 'separator' },
+        { role: 'cut', enabled: !!editFlags.canCut },
+        { role: 'copy', enabled: !!editFlags.canCopy },
+        { role: 'paste', enabled: !!editFlags.canPaste },
+        { role: 'selectAll', enabled: !!editFlags.canSelectAll },
+        { type: 'separator' },
+      )
+    } else if (params.selectionText) {
+      template.push({ role: 'copy', enabled: !!params.editFlags?.canCopy }, { type: 'separator' })
+    }
+    template.push({ label: 'Report a bug', click: () => window.webContents.send('pdfking:request-bug-report', { context: params.isEditable ? 'Text field' : 'Selected text' }) })
+    Menu.buildFromTemplate(template).popup({ window })
+  })
   window.webContents.on('will-navigate', (event, target) => {
     if (!isAppRendererURL(target, app.getAppPath())) event.preventDefault()
   })
@@ -405,18 +642,20 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  app.setName('PDF Dock')
-  if (process.platform === 'darwin') {
+  if (!hasSingleInstanceLock) return
+  if (!isCliRun) app.setName('PDF Dock')
+  if (!isCliRun && process.platform === 'darwin') {
     app.dock.setIcon(path.join(__dirname, '..', 'assets', 'pdf-dock.png'))
   }
+  if (isCliRun && process.platform === 'darwin') app.dock.hide()
   createWindow()
-  if (app.isPackaged && ['darwin', 'win32'].includes(process.platform)) {
+  if (!isCliRun && app.isPackaged && ['darwin', 'win32'].includes(process.platform)) {
     updateController.initialize()
     setTimeout(() => { void updateController.check() }, 5000)
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!isCliRun && BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
