@@ -1934,7 +1934,6 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange,on
     })
   }, [pages, viewMode, page])
   const totalHeight = entries.length ? entries[entries.length - 1].top + entries[entries.length - 1].height + 32 : 0
-  const maxWidth = Math.max(...entries.map((entry) => entry.width), 0)
   const startEntry = windowRange.start
   const endEntry = Math.min(entries.length, windowRange.end)
   const mountedEntries = entries.slice(startEntry, endEntry)
@@ -2311,8 +2310,8 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange,on
         {!sidebarCollapsed && sidebarTab === 'pages' && <div className="pdf-viewer-sidebar-footer"><span>Current page</span><strong>{page} <i>/</i> {pageCount}</strong></div>}
       </aside>}
       <div className={`pdf-viewer-page ${viewMode === 'single' ? 'is-single-page' : ''} ${viewMode === 'book' ? 'is-book-view' : ''} ${presentationMode ? 'is-presentation-page' : ''}`} ref={pageContainer} tabIndex={0} aria-label={`PDF pages, ${ariaMode} mode`}>
-        <div className="pdf-viewer-virtual-space" style={{ height: totalHeight, minWidth: maxWidth }}>
-          {mountedEntries.map((entry) => <div className="pdf-viewer-virtual-slot" data-page={entry.page} key={`${pageKey}-${entry.page}`} style={{ top: entry.top, height: entry.height, minWidth: maxWidth }}>
+        <div className="pdf-viewer-virtual-space" style={{ height: totalHeight }}>
+          {mountedEntries.map((entry) => <div className="pdf-viewer-virtual-slot" data-page={entry.page} key={`${pageKey}-${entry.page}`} style={{ top: entry.top, height: entry.height, minWidth: entry.width }}>
             <div className="pdf-viewer-virtual-spread" style={{ width: entry.width, height: entry.height }}>
               {entry.pages.map((item, sideIndex) => {
                 const pageResults = searchHighlights.get(item.pageNumber) || []

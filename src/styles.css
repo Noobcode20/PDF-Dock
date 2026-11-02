@@ -3598,3 +3598,5 @@ input:checked + .slider-round:before { transform: translateX(16px); }
 @media (max-width: 560px) {
   .full-pdf-editor-mode .pdf-viewer-sidebar:not(:has(.pdf-viewer-search-panel)) { display: none; }
 }
+
+.pdf-viewer-virtual-space { width: 100%; }
