@@ -1,3 +1,5 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { readFile, writeFile } from 'node:fs/promises'
 import { createCanvas, loadImage } from '@napi-rs/canvas'
 import { createPdfToolkit } from 'pdfstudio'
@@ -13,7 +15,7 @@ await writeFile(process.argv[3],result.data);console.log({source:source.length,o
 
 // Validate native document behavior against the source, even when the target
 // is unattainable. This harness accepts personal PDFs without checking them in.
-const tasks = [source, result.data].map(data => pdfjs.getDocument({ data: data.slice(), useSystemFonts: true, wasmUrl: new URL('../node_modules/pdfjs-dist/wasm/', import.meta.url).pathname }))
+const tasks = [source, result.data].map(data => pdfjs.getDocument({ data: data.slice(), useSystemFonts: true, wasmUrl: fileURLToPath(new URL('../node_modules/pdfjs-dist/wasm/', import.meta.url)).split(path.sep).join('/') }))
 const [before, after] = await Promise.all(tasks.map(task => task.promise))
 const { default: assert } = await import('node:assert/strict')
 try {

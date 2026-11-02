@@ -25,7 +25,7 @@ import { writeEditorDocument } from "../src/editor/save.js";
 import { addOcrWords } from "../src/editor/ocrTextLayer.js";
 import { normalizeFont, systemFontKey } from "../src/editor/fonts.js";
 const standardFontDataUrl =
-  path.resolve("node_modules/pdfjs-dist/standard_fonts") + path.sep;
+  path.resolve('node_modules/pdfjs-dist/standard_fonts').split(path.sep).join('/') + '/';
 const require = createRequire(import.meta.url),
   { atomicWrite } = require("../electron/atomicWrite.cjs");
 const pdf = await PDFDocument.create(),

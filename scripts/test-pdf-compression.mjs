@@ -1,3 +1,5 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { createCanvas, loadImage } from '@napi-rs/canvas'
@@ -260,7 +262,7 @@ console.log('Unattainable 70% target: all 6 pages retain selectable/searchable t
 // Renderer-backed image decoding must preserve transparency while downscaling
 // both color and alpha, without changing the native text/page structure.
 const decodePdfImage = async (bytes, scale) => {
-  const task = pdfjs.getDocument({ data: bytes, wasmUrl: new URL('../node_modules/pdfjs-dist/wasm/', import.meta.url).pathname, stopAtErrors: true })
+  const task = pdfjs.getDocument({ data: bytes, wasmUrl: fileURLToPath(new URL('../node_modules/pdfjs-dist/wasm/', import.meta.url)).split(path.sep).join('/'), stopAtErrors: true })
   try {
     const doc = await task.promise
     const page = await doc.getPage(1)
