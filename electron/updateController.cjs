@@ -29,6 +29,8 @@ function createUpdateController({ updater, getUpdater, app, send, platform = pro
     updater.autoInstallOnAppQuit = false
     updater.allowPrerelease = true
     updater.channel = 'beta'
+    // Setting a channel enables downgrades in electron-updater; beta stays forward-only.
+    updater.allowDowngrade = false
     updater.on('checking-for-update', () => publish({ status: 'checking', error: null }))
     updater.on('update-available', async (info) => {
       const preferences = await readPreferences()

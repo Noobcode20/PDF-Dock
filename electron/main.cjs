@@ -237,7 +237,11 @@ ipcMain.handle('pdfking:update-open-download', async () => {
   const asset = process.platform === 'darwin'
     ? `PDF-Dock-macOS-${process.arch === 'arm64' ? 'arm64' : 'x64'}.dmg`
     : 'PDF-Dock-Windows.exe'
-  await shell.openExternal(`https://github.com/Noobcode20/PDF-Dock/releases/latest/download/${asset}`)
+  const version = updateController.getState().version
+  const target = typeof version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
+    ? `https://github.com/Noobcode20/PDF-Dock/releases/download/v${version}/${asset}`
+    : 'https://github.com/Noobcode20/PDF-Dock/releases'
+  await shell.openExternal(target)
   return true
 })
 const serializeRecentUpdate = (operation) => {

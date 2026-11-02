@@ -52,7 +52,6 @@ export const paths = {
   layers: <><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>,
   bug: <><path d="M9 8V5a3 3 0 0 1 6 0v3"/><path d="M5 11h14M7 11v5a5 5 0 0 0 10 0v-5"/><path d="M5 10 3 8m16 2 2-2M6 16H3m18 0h-3M9 5 7 3m8 2 2-2"/></>,
   comment: <><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.7 8.7 0 0 1-4-.9L4 20l1.1-3.5A7.2 7.2 0 0 1 4 12c0-4.1 3.6-7.5 8-7.5s8 3.1 8 7Z"/><path d="M8 11h8M8 14h5"/></>,
-  bug: <><path d="M8 8h8v8a4 4 0 0 1-8 0V8Z"/><path d="M9 4 12 7l3-3M5 11h3m8 0h3M5 16h3m8 0h3M12 12v5"/><path d="M7 7 5 5m12 2 2-2"/></>,
   print: <><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></>,
   save: <><path d="M5 3h12l4 4v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h1Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></>,
   share: <><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.7 6.6-4.4m-6.6 7 6.6 4.4"/></>,

@@ -3580,3 +3580,21 @@ input:checked + .slider-round:before { transform: translateX(16px); }
   .settings-redesign .feedback-report-form .feedback-report-footer { margin: 4px -15px -15px; padding: 12px 15px; }
   .settings-redesign .feedback-report-form .feedback-report-footer .bug-report-privacy { font-size: 11px; }
 }
+
+/* Normal Select mode lets text and form widgets win overlapping image hits. */
+.pdf-image-object-layer.is-image-detection-mode { z-index: 1; pointer-events: none; }
+.pdf-image-object-layer.is-image-detection-mode .pdf-image-object { pointer-events: auto; }
+.pdf-text-layer.is-object-select-mode { z-index: 2; pointer-events: none; }
+
+/* Virtual page geometry is anchored by the viewer, not by browser scroll anchoring. */
+.pdf-viewer-page { overflow-anchor: none; }
+
+@media (max-width: 760px) {
+  .full-pdf-editor-mode .pdf-editor-workspace { grid-template-columns: 38px minmax(0, 1fr) 0; }
+  .full-pdf-editor-mode .pdf-editor-workspace:not(.right-sidebar-collapsed) .pdf-editor-options { position: absolute; z-index: 40; top: 58px; right: 0; bottom: 0; width: min(250px, calc(100% - 38px)); box-sizing: border-box; }
+  .full-pdf-editor-mode .pdf-editor-command-footer { z-index: 42; width: min(250px, calc(100% - 38px)); }
+  .full-pdf-editor-mode .pdf-editor-command-quick-actions { z-index: 41; }
+}
+@media (max-width: 560px) {
+  .full-pdf-editor-mode .pdf-viewer-sidebar:not(:has(.pdf-viewer-search-panel)) { display: none; }
+}

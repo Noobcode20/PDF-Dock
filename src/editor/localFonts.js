@@ -1,4 +1,3 @@
-import fontkit from '@pdf-lib/fontkit'
 
 const DB_NAME = 'pdfking-font-library'
 const STORE_NAME = 'fonts'
@@ -29,7 +28,7 @@ export const getLocalFont = (id) => withStore('readonly', (store) => store.get(i
 export const saveLocalFont = (font) => withStore('readwrite', (store) => store.put(font))
 export const removeLocalFont = (id) => withStore('readwrite', (store) => store.delete(id))
 
-export function readFontFamilyName(data, fallback = 'Local font') {
-  try { return fontkit.create(new Uint8Array(data)).familyName || fallback }
+export async function readFontFamilyName(data, fallback = 'Local font') {
+  try { const { default: fontkit } = await import('@pdf-lib/fontkit'); return fontkit.create(new Uint8Array(data)).familyName || fallback }
   catch { return fallback }
 }

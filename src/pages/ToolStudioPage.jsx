@@ -971,7 +971,13 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const [editorMenuTab, setEditorMenuTab] = useState(() => SECURE_EDITOR_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'secure' : INSERT_EDITOR_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'insert' : PDF_EXPORT_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'export' : 'home')
   const [editorSearchExpanded, setEditorSearchExpanded] = useState(() => Boolean(editorDraft?.viewerState?.searchQuery))
   // Phones start with the side panels folded away so the document keeps the room.
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 560px)').matches)
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 760px)')
+    const adapt = () => { if (narrow.matches) setRightSidebarCollapsed(true) }
+    narrow.addEventListener('change', adapt)
+    return () => narrow.removeEventListener('change', adapt)
+  }, [])
   useEffect(() => {
     const root = editorWorkspaceRef.current
     const tooltip = editorTooltipRef.current
@@ -1335,6 +1341,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     if (tab === 'secure' && !SECURE_EDITOR_TOOLS.some(([id]) => id === toolId)) { setToolId('protect-pdf'); setTextEditMode(false) }
   }
   const selectTextObject = () => {
+    selectEditorMenuTab('home')
     setToolId('edit-text')
     setTextEditMode(true)
     setError('')
@@ -1349,6 +1356,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   /* A double click on an image opens the image inspector for it. The image
    * itself is never moved, duplicated or transformed by the double click. */
   const openImageInspector = (image) => {
+    selectEditorMenuTab('home')
     if (toolId !== 'images') activateEditorTool('images')
     selectImageObject(image)
   }
@@ -1673,7 +1681,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
             </div>)}
           </div>
         </div>}
-        <PdfViewer redactionMarks={redaction} onRedactionAdd={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:[...currentEditSnapshot.current.redaction,{...mark,key:crypto.randomUUID(),page:mark.page,viewerRotation:Number(viewerState.rotation)||0}]})} onRedactionChange={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.map(m=>m.key===mark.key?mark:m)})} onRedactionDelete={key=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.filter(m=>m.key!==key)})} selectedAnnotation={selectedAnnotation} onAnnotationSelect={setSelectedAnnotation} onAnnotationChange={updateAnnotation} annotationMode={toolId} annotations={[...annotations,...formCandidates.map(candidate=>({...candidate,type:'candidate',color:'#2381dd',opacity:.8}))]} annotationStyle={annotationStyle} onAnnotationAdd={items=>{if(sessionRef.current.id!==session.id||filesRef.current[0]!==file)return;const added=items.map(item=>({...item,key:item.key||crypto.randomUUID()}));commitEditSnapshot({...currentEditSnapshot.current,annotations:[...currentEditSnapshot.current.annotations,...added]});setSelectedAnnotation(added.at(-1))}} file={file} page={viewerPage} pageCount={pageCount} pageSizes={pageSizes} viewerState={viewerState} onViewerStateChange={setViewerState} onPageChange={navPage} formValues={options.fields || {}} onFormValueChange={(name, value) => setOption('fields', { ...(options.fields || {}), [name]: value })} editTextMode={textEditMode} addTextMode={toolId === 'add-text'} imageSelectMode={toolId === 'images'} textStyle={textStyle} onTextStyleActivate={setTextStyle} localFonts={localFonts} onSelectTextFont={selectTextFont} onAddTextPlaced={() => { setToolId('add-text'); setTextEditMode(false) }} onTextObjectSelected={selectTextObject} imageEdits={imageEdits} selectedImage={selectedImage} onSelectImage={selectImageObject} onImageOpen={openImageInspector} onImageEdit={edit=>saveImageEdit({...edit,viewerRotation:Number(viewerState.rotation)||0})} onImageDelete={deleteSelectedImage} onImageDuplicate={duplicateSelectedImage} onPlaceImage={(image,position)=>void placeImageFile(image,position)} textEdits={textEdits} onTextEdit={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: [...textEdits.filter((item) => !(item.page === edit.page && item.key === edit.key)), { ...edit, viewerRotation: Number(viewerState.rotation)||0 }] })} onTextDelete={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: textEdits.filter((item) => item.page !== edit.page || item.key !== edit.key) })} />
+        <PdfViewer redactionMarks={redaction} onRedactionAdd={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:[...currentEditSnapshot.current.redaction,{...mark,key:crypto.randomUUID(),page:mark.page,viewerRotation:Number(viewerState.rotation)||0}]})} onRedactionChange={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.map(m=>m.key===mark.key?mark:m)})} onRedactionDelete={key=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.filter(m=>m.key!==key)})} onObjectOpen={(mode, item) => { selectEditorMenuTab('home'); activateEditorTool(mode); if (item) setSelectedAnnotation(item) }} selectedAnnotation={selectedAnnotation} onAnnotationSelect={setSelectedAnnotation} onAnnotationChange={updateAnnotation} annotationMode={toolId} annotations={[...annotations,...formCandidates.map(candidate=>({...candidate,type:'candidate',color:'#2381dd',opacity:.8}))]} annotationStyle={annotationStyle} onAnnotationAdd={items=>{if(sessionRef.current.id!==session.id||filesRef.current[0]!==file)return;const added=items.map(item=>({...item,key:item.key||crypto.randomUUID()}));commitEditSnapshot({...currentEditSnapshot.current,annotations:[...currentEditSnapshot.current.annotations,...added]});setSelectedAnnotation(added.at(-1))}} file={file} page={viewerPage} pageCount={pageCount} pageSizes={pageSizes} viewerState={viewerState} onViewerStateChange={setViewerState} onPageChange={navPage} formValues={options.fields || {}} onFormValueChange={(name, value) => setOption('fields', { ...(options.fields || {}), [name]: value })} editTextMode={textEditMode} addTextMode={toolId === 'add-text'} imageSelectMode={toolId === 'images'} textStyle={textStyle} onTextStyleActivate={setTextStyle} localFonts={localFonts} onSelectTextFont={selectTextFont} onAddTextPlaced={() => { setToolId('add-text'); setTextEditMode(false) }} onTextObjectSelected={selectTextObject} imageEdits={imageEdits} selectedImage={selectedImage} onSelectImage={selectImageObject} onImageOpen={openImageInspector} onImageEdit={edit=>saveImageEdit({...edit,viewerRotation:Number(viewerState.rotation)||0})} onImageDelete={deleteSelectedImage} onImageDuplicate={duplicateSelectedImage} onPlaceImage={(image,position)=>void placeImageFile(image,position)} textEdits={textEdits} onTextEdit={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: [...textEdits.filter((item) => !(item.page === edit.page && item.key === edit.key)), { ...edit, viewerRotation: Number(viewerState.rotation)||0 }] })} onTextDelete={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: textEdits.filter((item) => item.page !== edit.page || item.key !== edit.key) })} />
       </>}
 
     </section>
@@ -1797,7 +1805,7 @@ function RedactionPreview({ file, page, redaction, onMark }) {
   return <div className="redaction-preview-panel"><strong>Mark redaction on page {page}</strong><div className="redaction-canvas-wrap" style={{width:560,maxWidth:'100%'}}><canvas ref={canvas} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} />{visibleMarks.map((mark, index) => { const visible = { redactX: mark.redactX ?? mark.x, redactY: mark.redactY ?? mark.y, redactWidth: mark.redactWidth ?? mark.width, redactHeight: mark.redactHeight ?? mark.height }; return visible.redactWidth > 0 && visible.redactHeight > 0 ? <div key={index} className="redaction-mask-preview" style={{ left: `${visible.redactX * 100}%`, top: `${visible.redactY * 100}%`, width: `${visible.redactWidth * 100}%`, height: `${visible.redactHeight * 100}%` }} /> : null })}</div>{error && <p className="form-error">{error}</p>}<small>Drag a rectangle over the confidential content.</small></div>
 }
 
-function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, page, pageCount, pageSizes = [], viewerState = {}, onViewerStateChange = () => {}, onPageChange, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, onTextObjectSelected = () => {}, imageEdits = [], selectedImage, onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {} }) {
+function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange,onObjectOpen, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, page, pageCount, pageSizes = [], viewerState = {}, onViewerStateChange = () => {}, onPageChange, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, onTextObjectSelected = () => {}, imageEdits = [], selectedImage, onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {} }) {
   const pageContainer = useRef(null)
   const pageNodes = useRef([])
   const pendingZoomAnchor = useRef(null)
@@ -1811,7 +1819,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const [rotation, setRotation] = useState(() => ((Number(viewerState.rotation) || 0) % 360 + 360) % 360)
   const [darkPage, setDarkPage] = useState(() => Boolean(viewerState.darkPage))
   const [sidebarTab, setSidebarTab] = useState(() => ['pages', 'outline', 'search'].includes(viewerState.sidebarTab) ? viewerState.sidebarTab : 'pages')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(viewerState.sidebarCollapsed) || (typeof window !== 'undefined' && window.matchMedia('(max-width: 560px)').matches))
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(viewerState.sidebarCollapsed) || (typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches))
   const [searchQuery, setSearchQuery] = useState(() => viewerState.searchQuery || '')
   const [searchOptions, setSearchOptions] = useState(() => viewerState.searchOptions || { caseSensitive: false, wholeWord: false, regex: false })
   const [searchResults, setSearchResults] = useState([])
@@ -1822,7 +1830,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const [history, setHistory] = useState(() => viewerState.history || { entries: [Number(page) || 1], index: 0 })
   const [isInteracting, setIsInteracting] = useState(false)
   const [pageBox, setPageBox] = useState({ width: 900, height: 700 })
-  const [windowRange, setWindowRange] = useState({ start: 0, end: 5 })
+  const [windowRange, setWindowRange] = useState({ start: 0, end: 2 })
   const [pageSizeCache, setPageSizeCache] = useState(() => new Map(pageSizes.filter(Boolean).map((size) => [size.pageNumber, size])))
   const [selectedTextBox, setSelectedTextBox] = useState(null)
   const [presentationMode, setPresentationMode] = useState(false)
@@ -1833,6 +1841,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const interactionTimer = useRef(0)
   const navigationTimer = useRef(0)
   const pendingNavigationPage = useRef(null)
+  useEffect(() => () => window.clearTimeout(navigationTimer.current), [])
   const initialPositionRestored = useRef(false)
   const previousViewMode = useRef(viewMode)
   const previousPageTops = useRef(new Map())
@@ -1925,7 +1934,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
     })
   }, [pages, viewMode, page])
   const totalHeight = entries.length ? entries[entries.length - 1].top + entries[entries.length - 1].height + 32 : 0
-  const maxWidth = Math.max(pageBox.width, ...entries.map((entry) => entry.width), 0)
+  const maxWidth = Math.max(...entries.map((entry) => entry.width), 0)
   const startEntry = windowRange.start
   const endEntry = Math.min(entries.length, windowRange.end)
   const mountedEntries = entries.slice(startEntry, endEntry)
@@ -1949,8 +1958,8 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
 
   const updateVirtualRange = () => {
     const container = pageContainer.current
-    if (!container || !entries.length) { setWindowRange({ start: 0, end: Math.min(5, entries.length) }); return }
-    const buffer = Math.max(700, container.clientHeight * 1.35)
+    if (!container || !entries.length || !container.clientHeight) { setWindowRange((current) => current.start === 0 && current.end === Math.min(2, entries.length) ? current : { start: 0, end: Math.min(2, entries.length) }); return }
+    const buffer = Math.min(240, container.clientHeight * 0.3)
     const from = Math.max(0, container.scrollTop - buffer)
     const to = container.scrollTop + container.clientHeight + buffer
     let start = 0
@@ -1991,16 +2000,9 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
         onViewerStateChangeRef.current?.({ page: lastPageProp.current, scrollTop: container.scrollTop, zoom, viewMode, fitMode, rotation, darkPage, sidebarTab, sidebarCollapsed, searchQuery, searchOptions, history })
       }, 240)
     }
-    const finishNavigation = () => {
-      if (!pendingNavigationPage.current) return
-      window.clearTimeout(navigationTimer.current)
-      lastPageProp.current = pendingNavigationPage.current
-      pendingNavigationPage.current = null
-    }
     container.addEventListener('scroll', handleScroll, { passive: true })
-    container.addEventListener('scrollend', finishNavigation)
-    return () => { container.removeEventListener('scroll', handleScroll); container.removeEventListener('scrollend', finishNavigation); cancelAnimationFrame(frame); window.clearTimeout(scrollTimer.current); window.clearTimeout(interactionTimer.current); window.clearTimeout(navigationTimer.current) }
-  }, [entries, zoom, viewMode, fitMode, rotation, darkPage, sidebarTab, sidebarCollapsed, searchQuery, searchOptions, history])
+    return () => { container.removeEventListener('scroll', handleScroll); cancelAnimationFrame(frame); window.clearTimeout(scrollTimer.current); window.clearTimeout(interactionTimer.current) }
+  }, [entries, pageBox.height, zoom, viewMode, fitMode, rotation, darkPage, sidebarTab, sidebarCollapsed, searchQuery, searchOptions, history])
 
   useEffect(() => {
     if (!entries.length) return
@@ -2068,7 +2070,10 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
 
   useEffect(() => {
     const container = pageContainer.current
-    const currentEntry = entries.find((entry) => entry.pages.some((item) => item.pageNumber === page))
+    // Continuous scrolling must not change zoom when the visible page changes shape.
+    const currentEntry = viewMode === 'single'
+      ? entries.find((entry) => entry.pages.some((item) => item.pageNumber === page))
+      : entries[0]
     if (!fitMode || !container || !currentEntry?.width || !currentEntry?.height) return
     const style = getComputedStyle(container)
     const horizontalPadding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
@@ -2080,7 +2085,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
     const fitZoom = fitMode === 'fit-width' ? availableWidth / widthAt100 : Math.min(availableWidth / widthAt100, availableHeight / heightAt100)
     const fitted = Math.max(0.1, Math.min(2.5, fitZoom))
     setZoom((current) => Math.abs(current - fitted) < 0.002 ? current : fitted)
-  }, [fitMode, pageBox.width, pageBox.height, entries, page, zoom])
+  }, [fitMode, pageBox.width, pageBox.height, entries, page, zoom, viewMode])
 
   useEffect(() => {
     if (sidebarTab !== 'outline' || !file || outline.length) return
@@ -2195,6 +2200,10 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
     changePage(target, false)
   }
   const onWheel = (event) => {
+    if (!(event.ctrlKey || event.metaKey)) {
+      window.clearTimeout(navigationTimer.current)
+      pendingNavigationPage.current = null
+    }
     if (!(event.ctrlKey || event.metaKey)) return
     event.preventDefault()
     setZoomAround(zoom * Math.exp(-event.deltaY * 0.003), event.clientX, event.clientY)
@@ -2309,7 +2318,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
                 const pageResults = searchHighlights.get(item.pageNumber) || []
                 const actualVisible = entry.top + entry.height >= lastScrollTop.current && entry.top <= lastScrollTop.current + pageBox.height
                 const priority = actualVisible ? (item.pageNumber === page ? 0 : 1) : item.pageNumber > page ? 2 : 3
-                return <PdfViewerPage selectedAnnotation={selectedAnnotation} onAnnotationSelect={onAnnotationSelect} onAnnotationChange={onAnnotationChange} redactionMarks={redactionMarks.filter(m=>m.page===item.pageNumber)} onRedactionAdd={mark=>onRedactionAdd?.({...mark,page:item.pageNumber})} onRedactionChange={onRedactionChange} onRedactionDelete={onRedactionDelete} annotationMode={annotationMode} annotations={annotations.filter(a=>a.page===item.pageNumber)} annotationStyle={annotationStyle} onAnnotationAdd={onAnnotationAdd} key={`${pageKey}-${item.pageNumber}`} file={file} pageNumber={item.pageNumber} pageSize={item.size} displayWidth={item.width} displayHeight={item.height} pageNodes={pageNodes} root={pageContainer} zoom={zoom} rotation={rotation} renderQuality={isInteracting ? 'preview' : 'full'} renderPriority={priority} formValues={formValues} onFormValueChange={onFormValueChange} editTextMode={editTextMode} addTextMode={addTextMode} imageSelectMode={imageSelectMode} selectedImage={selectedImage} imageEdits={imageEdits.filter((edit) => edit.page === item.pageNumber)} onSelectImage={onSelectImage} onImageOpen={onImageOpen} onImageEdit={onImageEdit} onImageDelete={onImageDelete} onImageDuplicate={onImageDuplicate} onPlaceImage={onPlaceImage} onTextObjectSelected={onTextObjectSelected} textStyle={textStyle} onTextStyleActivate={onTextStyleActivate} localFonts={localFonts} onSelectTextFont={onSelectTextFont} onAddTextPlaced={onAddTextPlaced} textEdits={textEdits.filter((edit) => edit.page === item.pageNumber)} onTextEdit={onTextEdit} onTextDelete={onTextDelete} selectedTextBox={selectedTextBox} onSelectTextBox={setSelectedTextBox} searchRects={pageResults} onNavigateInternal={changePage} />
+                return <PdfViewerPage onObjectOpen={onObjectOpen} selectedAnnotation={selectedAnnotation} onAnnotationSelect={onAnnotationSelect} onAnnotationChange={onAnnotationChange} redactionMarks={redactionMarks.filter(m=>m.page===item.pageNumber)} onRedactionAdd={mark=>onRedactionAdd?.({...mark,page:item.pageNumber})} onRedactionChange={onRedactionChange} onRedactionDelete={onRedactionDelete} annotationMode={annotationMode} annotations={annotations.filter(a=>a.page===item.pageNumber)} annotationStyle={annotationStyle} onAnnotationAdd={onAnnotationAdd} key={`${pageKey}-${item.pageNumber}`} file={file} pageNumber={item.pageNumber} pageSize={item.size} displayWidth={item.width} displayHeight={item.height} pageNodes={pageNodes} root={pageContainer} zoom={zoom} rotation={rotation} renderQuality={isInteracting ? 'preview' : 'full'} renderPriority={priority} formValues={formValues} onFormValueChange={onFormValueChange} editTextMode={editTextMode} addTextMode={addTextMode} imageSelectMode={imageSelectMode} selectedImage={selectedImage} imageEdits={imageEdits.filter((edit) => edit.page === item.pageNumber)} onSelectImage={onSelectImage} onImageOpen={onImageOpen} onImageEdit={onImageEdit} onImageDelete={onImageDelete} onImageDuplicate={onImageDuplicate} onPlaceImage={onPlaceImage} onTextObjectSelected={onTextObjectSelected} textStyle={textStyle} onTextStyleActivate={onTextStyleActivate} localFonts={localFonts} onSelectTextFont={onSelectTextFont} onAddTextPlaced={onAddTextPlaced} textEdits={textEdits.filter((edit) => edit.page === item.pageNumber)} onTextEdit={onTextEdit} onTextDelete={onTextDelete} selectedTextBox={selectedTextBox} onSelectTextBox={setSelectedTextBox} searchRects={pageResults} onNavigateInternal={changePage} />
               })}
             </div>
           </div>)}
@@ -3194,7 +3203,7 @@ function renderStyledText(text, ranges, displayHeight, pageHeight, defaults) {
   })
 }
 
-function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, pageNumber, pageSize, displayWidth, displayHeight, pageNodes, root, zoom = 1, rotation = 0, renderQuality = 'full', renderPriority = 2, searchRects = [], onNavigateInternal = () => {}, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, selectedImage, imageEdits = [], onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, onTextObjectSelected = () => {}, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {}, selectedTextBox, onSelectTextBox = () => {} }) {
+function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChange,onObjectOpen, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, pageNumber, pageSize, displayWidth, displayHeight, pageNodes, root, zoom = 1, rotation = 0, renderQuality = 'full', renderPriority = 2, searchRects = [], onNavigateInternal = () => {}, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, selectedImage, imageEdits = [], onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, onTextObjectSelected = () => {}, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {}, selectedTextBox, onSelectTextBox = () => {} }) {
   const wrapper = useRef(null)
   const canvas = useRef(null)
     const textLayer = useRef(null)
@@ -3579,7 +3588,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
           setRendered(true)
           const results = await Promise.allSettled([
             engine.renderPdfTextLayer(file, pageNumber, targetText, scale, { rotation, signal: job.signal }),
-            imageSelectMode ? engine.inspectPdfPageImages(file, pageNumber, rotation) : Promise.resolve([]),
+            imageSelectMode || annotationMode === 'pdf-editor' ? engine.inspectPdfPageImages(file, pageNumber, rotation) : Promise.resolve([]),
             engine.inspectPdfPageLinks(file, pageNumber, rotation),
             engine.inspectPdfPageFormFields(file, pageNumber, rotation),
           ])
@@ -3609,7 +3618,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
       // Synchronous, instance-owned release before the next effect starts.
       targetText.replaceChildren()
     }
-  }, [file, pageNumber, pageSize?.width, renderQuality, renderPriority, rotation, imageSelectMode, renderRetry])
+  }, [file, pageNumber, pageSize?.width, renderQuality, renderPriority, rotation, imageSelectMode, annotationMode, renderRetry])
 
   const nativeDesignFields=formFields.filter(f=>f.type!=='Sig').map(f=>({
     ...f,key:`field-${f.key}`,type:'form-update',originalName:f.name,widgetId:f.key,page:pageNumber,viewerRotation:rotation,
@@ -3635,7 +3644,22 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     onPlaceImage?.(dropped, { page: pageNumber, x, y })
   }
 
-  return <div className="acrobat-document-page" data-page-number={pageNumber} style={{ aspectRatio, width: `${displayWidth || pageSize?.width * zoom * (96 / 72) || 816}px`, height: `${displayHeight || pageSize?.height * zoom * (96 / 72) || 1056}px` }} ref={(node) => { wrapper.current = node; pageNodes.current[pageNumber - 1] = node }} onPointerDown={handlePagePointerDown} onDragOver={(event) => { if ([...(event.dataTransfer?.types || [])].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={handleImageDrop}>
+  return <div className="acrobat-document-page" data-page-number={pageNumber} style={{ aspectRatio, width: `${displayWidth || pageSize?.width * zoom * (96 / 72) || 816}px`, height: `${displayHeight || pageSize?.height * zoom * (96 / 72) || 1056}px` }} ref={(node) => { wrapper.current = node; pageNodes.current[pageNumber - 1] = node }} onDoubleClickCapture={event => {
+      if (annotationMode !== 'pdf-editor') return
+      if (event.target.closest('.pdf-form-widget, .pdf-form-signature-placeholder')) {
+        onObjectOpen?.('fill-forms')
+        return
+      }
+      const bounds = wrapper.current.getBoundingClientRect()
+      const x = (event.clientX - bounds.left) / bounds.width
+      const y = (event.clientY - bounds.top) / bounds.height
+      const item = [...annotations].reverse().find(item => !item.deleted && item.type === 'annotation' && x >= item.x && x <= item.x + item.width && y >= item.y && y <= item.y + item.height)
+      if (item) {
+        event.preventDefault()
+        event.stopPropagation()
+        onObjectOpen?.('annotation-select', item)
+      }
+    }} onPointerDown={handlePagePointerDown} onDragOver={(event) => { if ([...(event.dataTransfer?.types || [])].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={handleImageDrop}>
     {snapGuides.map((guide, index) => <span key={`${guide.axis}-${index}`} className={`pdf-text-snap-guide ${guide.axis}`} style={guide.axis === 'vertical' ? { left: `${guide.position * 100}%` } : { top: `${guide.position * 100}%` }} aria-hidden="true" />)}
     {!rendered && !canvas.current?.dataset.painted && <div className="acrobat-page-placeholder" aria-hidden="true" />}
     <canvas ref={canvas} className={rendered ? 'is-rendered' : canvas.current?.dataset.painted ? 'is-stale' : 'is-pending'} aria-label={`PDF page ${pageNumber}`} />
@@ -3656,10 +3680,10 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     })}</div>
     <div className="pdf-image-object-layer">{imageEdits.filter(edit=>(edit.isNew||!imageSelectMode)&&!edit.deleted).map(edit=><PdfImageObject key={edit.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} pageSize={pageSize} region={edit} imageEdit={edit} selected={selectedImage?.page === pageNumber && selectedImage?.key === edit.key} selectedImage={selectedImage} onSelect={onSelectImage} onOpen={onImageOpen} onChange={onImageEdit} onDelete={onImageDelete} onDuplicate={onImageDuplicate} pageWidth={displayWidth || pageWidth} pageHeight={displayHeight || pageHeight} candidate={imageSelectMode} />)}</div>
     {searchRects.length > 0 && <div className="pdf-search-highlight-layer" aria-hidden="true">{searchRects.map((rect) => <span key={rect.id} className={rect.active ? 'is-active' : ''} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} />)}</div>}
-    <div ref={textLayer} className={`pdf-text-layer is-text-editing ${addTextMode ? 'is-adding-text' : ''}`} aria-label={`Selectable text on page ${pageNumber}`} onPointerDown={handleTextLayerPointerDown} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} onClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; const span = event.target.closest('.pdf-text-layer span'); lastClickedTextSpan.current = span || null; if (!span) { if (addTextMode) beginTextEdit(event, true); return } const group = collectEditableTextGroups(textLayer.current, pageSize).find((candidate) => candidate.spans.includes(span)); if (group?.key !== selectedText?.key) beginTextEdit(event, false, span) }} onDoubleClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; window.clearTimeout(pendingTextSelection.current); beginTextEdit(event, true, event.target.closest('.pdf-text-layer span') || lastClickedTextSpan.current) }} />
+    <div ref={textLayer} className={`pdf-text-layer is-text-editing ${annotationMode === 'pdf-editor' ? 'is-object-select-mode' : ''} ${addTextMode ? 'is-adding-text' : ''}`} aria-label={`Selectable text on page ${pageNumber}`} onPointerDown={handleTextLayerPointerDown} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} onClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; const span = event.target.closest('.pdf-text-layer span'); lastClickedTextSpan.current = span || null; if (!span) { if (addTextMode) beginTextEdit(event, true); return } const group = collectEditableTextGroups(textLayer.current, pageSize).find((candidate) => candidate.spans.includes(span)); if (group?.key !== selectedText?.key) beginTextEdit(event, false, span) }} onDoubleClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; window.clearTimeout(pendingTextSelection.current); beginTextEdit(event, true, event.target.closest('.pdf-text-layer span') || lastClickedTextSpan.current) }} />
     {linkRegions.length > 0 && <div className="pdf-link-layer" aria-label={`Links on page ${pageNumber}`}>{linkRegions.map((link, index) => <a key={`${link.x}-${link.y}-${index}`} href={link.url || '#'} title={link.title} aria-label={link.title} style={{ left: `${link.x * 100}%`, top: `${link.y * 100}%`, width: `${link.width * 100}%`, height: `${link.height * 100}%` }} onClick={(event) => { event.stopPropagation(); if (link.destinationPage) onNavigateInternal(link.destinationPage); else if (link.url && event.metaKey) {/* Cmd+click - let browser open in new tab naturally */} else if (link.url) { event.preventDefault(); window.pdfKing?.openExternal?.(link.url).catch?.(() => {}) } } } />)}</div>}
     {annotationMode!=='form-design' && formFields.length > 0 && <PdfNativeFormLayer fields={formFields} pageNumber={pageNumber} pageSize={pageSize} pageHeight={pageHeight} values={formValues} onChange={onFormValueChange} />}
-    {imageSelectMode && imageRegions.length > 0 && <div className="pdf-image-object-layer" aria-label={`Images on page ${pageNumber}`}>
+    {imageRegions.length > 0 && <div className={`pdf-image-object-layer ${imageSelectMode ? 'is-image-select-mode' : 'is-image-detection-mode'}`} aria-label={`Images on page ${pageNumber}`}>
       {imageRegions.map((region) => <PdfImageObject key={region.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} pageSize={pageSize} region={region} imageEdit={imageEdits.find((edit) => edit.key === region.key)} selected={selectedImage?.page === pageNumber && selectedImage?.key === region.key} selectedImage={selectedImage} onSelect={onSelectImage} onOpen={onImageOpen} onChange={onImageEdit} onDelete={onImageDelete} onDuplicate={onImageDuplicate} pageWidth={displayWidth || pageWidth} pageHeight={displayHeight || pageHeight} candidate />)}
     </div>}
     {textEdits.filter((edit) => !edit.isNew && edit.backgroundColor && !edit.sourceCoverRects?.length).map((edit) => <span className="pdf-text-source-cover" key={`cover-${edit.key}`} aria-hidden="true" style={{ left: `${(edit.coverX ?? edit.x) * 100}%`, top: `${(edit.coverY ?? edit.y) * 100}%`, width: `${Math.min(1 - (edit.coverX ?? edit.x), edit.coverWidth || edit.width) * 100}%`, height: `${Math.min(1 - (edit.coverY ?? edit.y), edit.coverHeight || edit.height) * 100}%`, backgroundColor: edit.backgroundColor }} />)}
@@ -3667,7 +3691,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     {textEdits.map((edit) => {
       const preview = resolvedSelectedText?.key === edit.key ? resolvedSelectedText : edit
       const layout = getTextEditDisplayLayout(preview, pageWidth, pageHeight)
-      return <span className={`pdf-text-edit-preview ${edit.isNew ? 'is-new-text' : ''} ${edit.isNew && selectedTextBox?.page === pageNumber && selectedTextBox?.key === edit.key ? 'is-selected-text' : ''} `} key={edit.key} style={{ left: `${layout.left * 100}%`, top: `${layout.top * 100}%`, width: `${layout.width / (edit.horizontalScale || 1) * 100}%`, height: `${layout.height * 100}%`, fontSize: `${Math.max(.1, (edit.previewFontScale || edit.fontScale || edit.height * 0.8) * pageHeight)}px`, letterSpacing: edit.letterSpacingPt ? `${edit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : edit.letterSpacing ? `${edit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: layout.transform, lineHeight: `${Math.max(.1, (edit.lineHeightScale || edit.fontScale * 1.2) * pageHeight)}px`, fontFamily: edit.previewFontFamily || edit.fontFamily || 'sans-serif', fontWeight: edit.fontWeight || '400', fontStyle: edit.fontStyle || 'normal', color: edit.color || '#111', opacity: edit.opacity ?? 1, textAlign: edit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: edit.isNew || !edit.sourceLineCount ? 'pre-wrap' : 'pre', overflow: 'hidden' }} onClick={!edit.isNew ? (event) => { event.stopPropagation(); onTextObjectSelected(); if (selectedText?.key !== edit.key) setSelectedText(edit) } : undefined} onDoubleClick={!edit.isNew ? (event) => openEditedText(event, edit) : undefined} onPointerDown={(event) => { if (edit.isNew || !event.target.closest('.pdf-text-box-resize')) startBoxGesture(event, edit) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} title={edit.isNew ? 'Click to select; Delete or Backspace to remove; drag to move; drag an edge or corner to resize' : 'Click to select, drag to move, drag a handle to resize, and double-click to edit'}><span className="pdf-text-edit-content">{renderStyledText(edit.text, edit.styleRanges, pageHeight, pageSize?.height || 792, edit)}</span>{edit.isNew && <button type="button" className="pdf-text-box-delete" aria-label="Delete text box" title="Delete text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectTextBox(null); onTextDelete({ ...edit, page: pageNumber }) }}>×</button>}{edit.isNew && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, edit, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
+      return <span className={`pdf-text-edit-preview ${edit.isNew ? 'is-new-text' : ''} ${edit.isNew && selectedTextBox?.page === pageNumber && selectedTextBox?.key === edit.key ? 'is-selected-text' : ''} `} key={edit.key} style={{ left: `${layout.left * 100}%`, top: `${layout.top * 100}%`, width: `${layout.width / (edit.horizontalScale || 1) * 100}%`, height: `${layout.height * 100}%`, fontSize: `${Math.max(.1, (edit.previewFontScale || edit.fontScale || edit.height * 0.8) * pageHeight)}px`, letterSpacing: edit.letterSpacingPt ? `${edit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : edit.letterSpacing ? `${edit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: layout.transform, lineHeight: `${Math.max(.1, (edit.lineHeightScale || edit.fontScale * 1.2) * pageHeight)}px`, fontFamily: edit.previewFontFamily || edit.fontFamily || 'sans-serif', fontWeight: edit.fontWeight || '400', fontStyle: edit.fontStyle || 'normal', color: edit.color || '#111', opacity: edit.opacity ?? 1, textAlign: edit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: edit.isNew || !edit.sourceLineCount ? 'pre-wrap' : 'pre', overflow: 'hidden' }} onClick={!edit.isNew ? (event) => { event.stopPropagation(); onTextObjectSelected(); if (selectedText?.key !== edit.key) setSelectedText(edit) } : undefined} onDoubleClick={(event) => openEditedText(event, edit)} onPointerDown={(event) => { if (edit.isNew || !event.target.closest('.pdf-text-box-resize')) startBoxGesture(event, edit) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} title={edit.isNew ? 'Click to select; Delete or Backspace to remove; drag to move; drag an edge or corner to resize' : 'Click to select, drag to move, drag a handle to resize, and double-click to edit'}><span className="pdf-text-edit-content">{renderStyledText(edit.text, edit.styleRanges, pageHeight, pageSize?.height || 792, edit)}</span>{edit.isNew && <button type="button" className="pdf-text-box-delete" aria-label="Delete text box" title="Delete text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectTextBox(null); onTextDelete({ ...edit, page: pageNumber }) }}>×</button>}{edit.isNew && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, edit, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
     })}
     {resolvedSelectedText && !resolvedSelectedText.isNew && <span className="pdf-selected-text-box" style={{ left: `${resolvedSelectedText.x * 100}%`, top: `${getTextEditDisplayLayout(resolvedSelectedText, pageWidth, pageHeight).visualTop * 100}%`, width: `${resolvedSelectedText.width * 100}%`, height: `${resolvedSelectedText.height * 100}%` }} aria-label="Selected text box" title="Double-click to edit; drag to reposition; use the handles to resize" onDoubleClick={(event) => openEditedText(event, resolvedSelectedText)} onPointerDown={(event) => startBoxGesture(event, resolvedSelectedText)} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture}>{['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, resolvedSelectedText, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>}
     {selectedToolbarEdit && !activeTextEdit && <div className="pdf-text-selection-toolbar" style={{ left: `${selectedToolbarLayout.visualLeft * 100}%`, top: `${Math.max(6, selectedToolbarLayout.visualTop * pageHeight - 44)}px` }} aria-label="Selected text box quick actions" onPointerDown={event => event.preventDefault()}><span>Text box</span><button type="button" onClick={event => openEditedText(event, selectedToolbarEdit)}>Edit</button><button type="button" className="danger" onClick={() => { onTextEdit({ ...selectedToolbarEdit, page: pageNumber, text: '' }); setSelectedText(null); onSelectTextBox(null) }}>Delete</button></div>}

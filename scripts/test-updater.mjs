@@ -35,6 +35,7 @@ try {
   await controller.check()
   assert.equal(updater.allowPrerelease, true)
   assert.equal(updater.channel, 'beta')
+  assert.equal(updater.allowDowngrade, false)
   updater.emit('update-available', { version: '0.1.0-beta.3' })
   await waitFor(() => controller.getState().status, 'available')
   await controller.download()

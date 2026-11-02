@@ -5,3 +5,7 @@ dist/
 .DS_Store
 output/
 release/
+
+# Generated audit fixtures and screenshots
+tmp/
+scripts/.audit-*.cjs
