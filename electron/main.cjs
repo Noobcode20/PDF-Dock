@@ -2,13 +2,37 @@ const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
 const { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, Menu } = require('electron')
+const { autoUpdater } = require('electron-updater')
+const { createUpdateController } = require('./updateController.cjs')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const crypto = require('node:crypto')
 const os = require('node:os')
-
+const { execFile } = require('node:child_process')
+const { promisify } = require('node:util')
 const githubTokenFile = () => path.join(app.getPath('userData'), 'github-feedback-token.enc')
 const githubAuthSessions = new Map()
+const isCliRun = process.argv.includes('--pdf-dock-cli')
+ipcMain.handle('pdfking:install-cli', async () => {
+  const root = path.join(app.getPath('userData'), 'cli')
+  await fs.mkdir(root, { recursive: true })
+  const cliSource = app.isPackaged ? path.join(process.resourcesPath, 'cli', 'pdf-dock.mjs') : path.join(__dirname, '..', 'bin', 'pdf-dock.mjs')
+  const cliTarget = path.join(root, 'pdf-dock.mjs')
+  await fs.copyFile(cliSource, cliTarget)
+  const skillSource = app.isPackaged ? path.join(process.resourcesPath, 'cli', 'SKILL.md') : path.join(__dirname, '..', 'skills', 'pdf-dock', 'SKILL.md')
+  const skillTarget = path.join(os.homedir(), '.agents', 'skills', 'pdf-dock', 'SKILL.md')
+  await fs.mkdir(path.dirname(skillTarget), { recursive: true })
+  await fs.copyFile(skillSource, skillTarget)
+  const launcher = path.join(root, process.platform === 'win32' ? 'pdf-dock.cmd' : 'pdf-dock')
+  const content = process.platform === 'win32' ? `@echo off\r\n"${process.execPath}" "${cliTarget}" %*\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${cliTarget}" "$@"\n`
+  await fs.writeFile(launcher, content, { mode: 0o755 })
+  return { launcher, skill: skillTarget }
+})
+let cliRequest = null
+if (isCliRun) {
+  try { cliRequest = JSON.parse(process.env.PDF_DOCK_CLI_REQUEST || '{}') }
+  catch { cliRequest = { command: 'invalid-request' } }
+}
 
 async function readGithubToken() {
   if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('Secure token storage is unavailable on this device.')
@@ -100,84 +124,6 @@ ipcMain.handle('pdfking:github-create-proxy-issue', async (_event, proxyUrl, pay
 
 const recentDirectory = () => path.join(app.getPath('userData'), 'recent-files')
 const recentIndex = () => path.join(recentDirectory(), 'index.json')
-const updatePreferencesPath = () => path.join(app.getPath('userData'), 'update-preferences.json')
-let skippedUpdateVersion = null
-let updatePreferencesQueue = Promise.resolve()
-let currentUpdateState = null
-let updateIsDownloaded = false
-let availableUpdateVersion = null
-
-async function readUpdatePreferences() {
-  try {
-    const preferences = JSON.parse(await fs.readFile(updatePreferencesPath(), 'utf8'))
-    skippedUpdateVersion = typeof preferences.skippedVersion === 'string' ? preferences.skippedVersion : null
-  } catch { skippedUpdateVersion = null }
-}
-
-function saveSkippedUpdateVersion(version) {
-  updatePreferencesQueue = updatePreferencesQueue.then(async () => {
-    await fs.mkdir(app.getPath('userData'), { recursive: true })
-    await fs.writeFile(updatePreferencesPath(), JSON.stringify({ skippedVersion: version }), 'utf8')
-    skippedUpdateVersion = version
-  })
-  return updatePreferencesQueue
-}
-
-function broadcastUpdateState(state) {
-  currentUpdateState = state
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('pdfking:update-state', state)
-  }
-}
-
-function configureAutoUpdates() {
-  if (!app.isPackaged) return
-  const { autoUpdater } = require('electron-updater')
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
-  autoUpdater.allowPrerelease = true
-  autoUpdater.on('update-available', (info) => {
-    if (info.version === skippedUpdateVersion) return
-    availableUpdateVersion = info.version
-    broadcastUpdateState({ status: 'available', version: info.version })
-  })
-  autoUpdater.on('download-progress', (progress) => {
-    if (availableUpdateVersion !== skippedUpdateVersion) broadcastUpdateState({ status: 'downloading', version: availableUpdateVersion, percent: Math.round(progress.percent || 0) })
-  })
-  autoUpdater.on('update-downloaded', (info) => {
-    if (info.version === skippedUpdateVersion) return
-    updateIsDownloaded = true
-    broadcastUpdateState({ status: 'downloaded', version: info.version })
-  })
-  autoUpdater.on('error', (error) => {
-    if (availableUpdateVersion && availableUpdateVersion !== skippedUpdateVersion) broadcastUpdateState({ status: 'error', version: availableUpdateVersion, message: error?.message || 'The update could not be downloaded.' })
-    else console.warn('Could not check for PDF Dock updates:', error?.message || error)
-  })
-  void autoUpdater.checkForUpdates().catch((error) => console.warn('Could not check for PDF Dock updates:', error?.message || error))
-}
-
-ipcMain.handle('pdfking:skip-update-version', async (_event, version) => {
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+/.test(version)) return false
-  await saveSkippedUpdateVersion(version)
-  if (currentUpdateState?.version === version) currentUpdateState = null
-  return true
-})
-ipcMain.handle('pdfking:get-update-state', () => currentUpdateState)
-ipcMain.handle('pdfking:download-update', async () => {
-  if (!app.isPackaged) return false
-  const { autoUpdater } = require('electron-updater')
-  if (process.platform === 'darwin') {
-    if (!availableUpdateVersion || !/^\d+\.\d+\.\d+/.test(availableUpdateVersion)) return false
-    await shell.openExternal(`https://github.com/Noobcode20/PDF-Dock/releases/tag/v${availableUpdateVersion}`)
-    return true
-  }
-  if (updateIsDownloaded) {
-    autoUpdater.quitAndInstall(false, true)
-    return true
-  }
-  await autoUpdater.downloadUpdate()
-  return true
-})
 const systemFontPaths = {
   'Arial-Regular': {
     darwin: ['/System/Library/Fonts/Supplemental/Arial.ttf'],
@@ -241,6 +187,27 @@ const systemFontPaths = {
   },
 }
 const tabDrags = new Map()
+let pendingPdfPaths = []
+let mainWindow = null
+let rendererReady = false
+function queuePdfPath(value) {
+  const filePath = typeof value === 'string' && path.isAbsolute(value) && /\.pdf$/i.test(value) ? value : null
+  if (!filePath) return
+  if (mainWindow && !mainWindow.isDestroyed() && rendererReady && !mainWindow.webContents.isLoading()) mainWindow.webContents.send('pdfking:open-file', filePath)
+  else pendingPdfPaths.push(filePath)
+}
+const initialPdfPaths = process.argv.slice(app.isPackaged ? 1 : 2).filter((value) => /^\//.test(value) && /\.pdf$/i.test(value))
+pendingPdfPaths.push(...initialPdfPaths)
+const hasSingleInstanceLock = isCliRun || app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) app.quit()
+else {
+  app.on('second-instance', (_event, argv) => {
+    const filePath = argv.find((value) => /^\//.test(value) && /\.pdf$/i.test(value))
+    if (filePath) queuePdfPath(filePath)
+    if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus() }
+  })
+  app.on('open-file', (event, filePath) => { event.preventDefault(); queuePdfPath(filePath) })
+}
 let recentQueue = Promise.resolve()
 const originalHandle = ipcMain.handle.bind(ipcMain)
 function trustedRendererFrame(frame) {
@@ -250,6 +217,32 @@ function trustedRendererFrame(frame) {
 ipcMain.handle = (channel, listener) => originalHandle(channel, (event, ...args) => {
   if (!trustedRendererFrame(event.senderFrame)) throw new Error('This request came from an untrusted renderer frame.')
   return listener(event, ...args)
+})
+const updateController = createUpdateController({
+  updater: autoUpdater,
+  app,
+  send: (state) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('pdfking:update-state', state)
+    }
+  },
+})
+ipcMain.handle('pdfking:update-get-state', () => updateController.getState())
+ipcMain.handle('pdfking:app-version', () => app.getVersion())
+ipcMain.handle('pdfking:update-check', () => updateController.check())
+ipcMain.handle('pdfking:update-download', () => updateController.download())
+ipcMain.handle('pdfking:update-install', () => updateController.install())
+ipcMain.handle('pdfking:update-skip', (_event, version) => updateController.skip(version))
+ipcMain.handle('pdfking:update-open-download', async () => {
+  const asset = process.platform === 'darwin'
+    ? `PDF-Dock-macOS-${process.arch === 'arm64' ? 'arm64' : 'x64'}.dmg`
+    : 'PDF-Dock-Windows.exe'
+  const version = updateController.getState().version
+  const target = typeof version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)
+    ? `https://github.com/Noobcode20/PDF-Dock/releases/download/v${version}/${asset}`
+    : 'https://github.com/Noobcode20/PDF-Dock/releases'
+  await shell.openExternal(target)
+  return true
 })
 const serializeRecentUpdate = (operation) => {
   const next = recentQueue.then(operation, operation)
@@ -348,12 +341,6 @@ ipcMain.handle('pdfking:cancel-close-window', (event) => {
   clearTimeout(window.__pdfKingCloseFallback)
   return true
 })
-ipcMain.handle('pdfking:renderer-ready', (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (!window || window.isDestroyed()) return false
-  window.__pdfKingRendererReady = true
-  return true
-})
 ipcMain.handle('pdfking:switch-window', (event, direction = 1) => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed())
   if (windows.length < 2) return false
@@ -373,6 +360,17 @@ ipcMain.handle('pdfking:open-pdf', async () => {
   const data = await fs.readFile(filePath)
   return { name: path.basename(filePath), data, filePath }
 })
+ipcMain.handle('pdfking:renderer-ready', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window || window !== mainWindow) return false
+  rendererReady = true
+  for (const filePath of pendingPdfPaths.splice(0)) window.webContents.send('pdfking:open-file', filePath)
+  return true
+})
+ipcMain.handle('pdfking:read-opened-pdf', async (_event, filePath) => {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || !/\.pdf$/i.test(filePath)) throw new Error('Invalid PDF path.')
+  return { name: path.basename(filePath), data: await fs.readFile(filePath), filePath }
+})
 
 ipcMain.handle('pdfking:convert-type1-fonts', async (_event, data) => convertType1Fonts(data))
 
@@ -387,6 +385,66 @@ ipcMain.handle('pdfking:read-system-font', async (_event, face) => {
     try { return new Uint8Array(await fs.readFile(filePath)) } catch { /* Try the next system font location. */ }
   }
   return null
+})
+
+ipcMain.handle('pdfking:cli-get-request', async () => {
+  if (!isCliRun || !cliRequest) throw new Error('No CLI operation is active.')
+  const inputPaths = cliRequest.command === 'create' || cliRequest.command === 'tools'
+    ? []
+    : ['run', 'edit'].includes(cliRequest.command)
+      ? (Array.isArray(cliRequest.files) ? cliRequest.files : [])
+      : [cliRequest.file].filter(Boolean)
+  if (inputPaths.length > 20) throw new Error('Choose no more than 20 input files per operation.')
+  const files = await Promise.all(inputPaths.map(async (filePath) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('Input files must be non-empty paths.')
+    const absolutePath = path.resolve(process.cwd(), filePath)
+    const [data, stat] = await Promise.all([fs.readFile(absolutePath), fs.stat(absolutePath)])
+    return { name: path.basename(absolutePath), path: absolutePath, lastModified: Math.floor(stat.mtimeMs), data: new Uint8Array(data) }
+  }))
+  if (files.reduce((sum, file) => sum + file.data.byteLength, 0) > 1024 * 1024 * 1024) throw new Error('Input files total more than 1 GB.')
+  return { ...cliRequest, files }
+})
+
+ipcMain.handle('pdfking:cli-progress', (_event, state) => {
+  if (!isCliRun || !cliRequest?.progress) return false
+  process.stderr.write(`${JSON.stringify({ event: 'progress', ...state })}\n`)
+  return true
+})
+
+ipcMain.handle('pdfking:cli-result', async (_event, result) => {
+  if (!isCliRun) throw new Error('No CLI operation is active.')
+  try {
+    if (!result || result.ok !== true) throw new Error(result?.error || 'The PDF operation failed.')
+    const outputs = Array.isArray(result.outputs) ? result.outputs : []
+    const requestedOutput = cliRequest.output ? path.resolve(process.cwd(), cliRequest.output) : null
+    if (requestedOutput && outputs.length > 1 && path.extname(requestedOutput)) throw new Error('This operation creates multiple files; set output to a directory, not a filename.')
+    const outputDirectory = requestedOutput
+      ? (outputs.length === 1 && path.extname(requestedOutput) ? path.dirname(requestedOutput) : requestedOutput)
+      : process.cwd()
+    if (outputs.length) await fs.mkdir(outputDirectory, { recursive: true })
+    const saved = []
+    for (const item of outputs) {
+      if (!item || typeof item.name !== 'string' || !item.data) throw new Error('PDF Dock returned an invalid output file.')
+      const targetPath = requestedOutput && outputs.length === 1 && path.extname(requestedOutput)
+        ? requestedOutput
+        : path.join(outputDirectory, path.basename(item.name))
+      if (!cliRequest.force) {
+        try { await fs.access(targetPath); throw new Error(`Output already exists: ${targetPath}. Set "force": true to replace it.`) }
+        catch (error) { if (error.code !== 'ENOENT') throw error }
+      }
+      const bytes = Buffer.from(item.data)
+      await atomicWrite(targetPath, bytes)
+      saved.push({ path: targetPath, name: path.basename(targetPath), size: bytes.byteLength, mimeType: item.mimeType || 'application/pdf' })
+    }
+    const response = { ok: true, command: cliRequest.command, ...(result.data !== undefined ? { data: result.data } : {}), ...(result.message ? { message: result.message } : {}), outputs: saved }
+    await new Promise((resolve) => process.stdout.write(`${JSON.stringify(response)}\n`, resolve))
+    setImmediate(() => app.quit())
+    return true
+  } catch (error) {
+    await new Promise((resolve) => process.stdout.write(`${JSON.stringify({ ok: false, error: error.message || String(error), outputs: [] })}\n`, resolve))
+    setImmediate(() => app.exit(1))
+    return false
+  }
 })
 
 ipcMain.handle('pdfking:add-recent-file', async (_event, { name, data, pages, sourcePath }) => serializeRecentUpdate(async () => {
@@ -515,6 +573,7 @@ function createWindow() {
     height: 920,
     minWidth: 1024,
     minHeight: 680,
+    show: !isCliRun,
     backgroundColor: '#17171b',
     title: 'PDF Dock',
     ...(process.platform === 'darwin' ? {
@@ -526,15 +585,15 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
+      ...(isCliRun ? { additionalArguments: ['--pdf-dock-cli'] } : {}),
     },
   })
+  mainWindow = window
+  rendererReady = false
 
   window.on('close', (event) => {
+    if (isCliRun) return
     if (window.__pdfKingCloseAllowed) { clearTimeout(window.__pdfKingCloseFallback); return }
-    // A close request can arrive before React has installed its unsaved-work
-    // listener (startup, a failed chunk load, or a renderer reload). Nothing
-    // can be dirty yet, so let Electron close instead of trapping the user.
-    if (!window.__pdfKingRendererReady) return
     event.preventDefault()
     if (window.__pdfKingClosePending) return
     window.__pdfKingClosePending = true
@@ -542,13 +601,12 @@ function createWindow() {
   })
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  window.webContents.on('did-finish-load', () => {
-    if (currentUpdateState && !window.isDestroyed()) window.webContents.send('pdfking:update-state', currentUpdateState)
-  })
+  if (isCliRun) {
+    window.webContents.on('did-fail-load', (_event, code, description, url) => {
+      process.stderr.write(`renderer load failed: ${description} (${code}) ${url}\n`)
+    })
+  }
   window.webContents.on('context-menu', (event, params) => {
-    // The renderer owns the normal workspace context menu. Keep Electron's native
-    // editing menu for text inputs and selections so its Report a bug item stays available.
-    if (!params.isEditable && !params.selectionText) return
     event.preventDefault()
     const template = []
     if (params.isEditable) {
@@ -587,17 +645,21 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(async () => {
-  app.setName('PDF Dock')
-  await readUpdatePreferences()
-  if (process.platform === 'darwin') {
+app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return
+  if (!isCliRun) app.setName('PDF Dock')
+  if (!isCliRun && process.platform === 'darwin') {
     app.dock.setIcon(path.join(__dirname, '..', 'assets', 'pdf-dock.png'))
   }
+  if (isCliRun && process.platform === 'darwin') app.dock.hide()
   createWindow()
-  configureAutoUpdates()
+  if (!isCliRun && app.isPackaged && ['darwin', 'win32'].includes(process.platform)) {
+    updateController.initialize()
+    setTimeout(() => { void updateController.check() }, 5000)
+  }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!isCliRun && BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 

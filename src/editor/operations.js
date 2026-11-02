@@ -135,9 +135,9 @@ export async function applyOperations(bytes, operations, { fonts = {} } = {}) {
       const lineHeight = Number(operation.lineHeightScale) * frame.height || size*1.2;
       if (text && (lines.some(line=>line.width>local.width/horizontalScale+.75) || baseline+(lines.length-1)*lineHeight>local.height+size*.35))
         throw new Error('Text exceeds its selected region. Resize the text box or reduce the font size before saving.');
-      if (!operation.isNew) removeSimpleTextRun(pdf,page,operation,frame);
+      const sourceRemoved = !operation.isNew && removeSimpleTextRun(pdf,page,operation,frame);
       withFrame(page, frame, () => {
-        if (!operation.isNew) {
+        if (!operation.isNew && !sourceRemoved) {
           const covers = operation.sourceCoverRects?.length ? operation.sourceCoverRects : [{
             x: operation.coverX ?? operation.x,
             y: operation.coverY ?? operation.y,
@@ -145,10 +145,22 @@ export async function applyOperations(bytes, operations, { fonts = {} } = {}) {
             height: operation.coverHeight || operation.height,
             backgroundColor: operation.sourceBackgroundColor || operation.backgroundColor || '#FFFFFF',
           }];
-          for (const cover of covers) page.drawRectangle({
-            ...displayRect(frame, cover),
-            color: color(cover.backgroundColor),
-          });
+          for (const cover of covers) {
+            const rect = displayRect(frame, cover);
+            const pad = 1;
+            const left = Math.max(0, rect.x - pad);
+            const bottom = Math.max(0, rect.y - pad);
+            const right = Math.min(frame.width, rect.x + rect.width + pad);
+            const top = Math.min(frame.height, rect.y + rect.height + pad);
+            if (right <= left || top <= bottom) continue;
+            page.drawRectangle({
+              x: left,
+              y: bottom,
+              width: right - left,
+              height: top - bottom,
+              color: color(cover.backgroundColor),
+            });
+          }
         }
         if (text) {
           const baseline = operation.rotation

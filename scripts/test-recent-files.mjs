@@ -4,14 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { EventEmitter } from "node:events";
 const require = createRequire(import.meta.url),
   directory = await fs.mkdtemp(path.join(os.tmpdir(), "pdfking-recents-")),
   handlers = new Map();
 const electron = {
   app: {
     getPath: () => directory,
+    getVersion: () => "0.1.0-beta.2",
+    isPackaged: false,
     getAppPath: () => process.cwd(),
     whenReady: () => ({ then: () => {} }),
+    requestSingleInstanceLock: () => true,
     on: () => {},
   },
   BrowserWindow: {},
@@ -30,8 +34,10 @@ vm.runInNewContext(source, {
           ? require("../electron/rendererOrigin.cjs")
         : name === "./fontCompression.cjs"
           ? require("../electron/fontCompression.cjs")
+        : name === "./updateController.cjs"
+          ? require("../electron/updateController.cjs")
         : name === "electron-updater"
-          ? { autoUpdater: {} }
+          ? { autoUpdater: new EventEmitter() }
         : require(name),
   __dirname: path.join(process.cwd(), "electron"),
   process,

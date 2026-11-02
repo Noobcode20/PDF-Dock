@@ -3,6 +3,7 @@ import { Icon } from '../icons'
 import { saveOutput } from '../fileServices'
 import { recentFilesBackend } from '../recentFiles'
 import { Presence } from '../components/Presence'
+import { ThemedSelect } from '../components/ThemedSelect'
 
 const formatBytes = (size = 0) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`
 
@@ -150,7 +151,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
           <div className="palette-search-row">
             <Icon name="search" size={18} className="palette-search-icon" />
             <input ref={inputRef} className="palette-input" type="search" placeholder="Search existing PDFs…" value={query} onChange={(event) => { const nextQuery = event.target.value; const hasMatch = recentFiles.some((record) => typeof record?.name === 'string' && record.name.toLowerCase().includes(nextQuery.trim().toLowerCase())); setQuery(nextQuery); setActiveIndex(nextQuery.trim() && hasMatch ? 1 : 0) }} onKeyDown={handleFilePickerKeyDown} aria-label="Search existing PDFs" />
-            <button className="palette-close-btn" type="button" onClick={onClose} aria-label="Close PDF picker"><kbd>Esc</kbd></button>
+            <button className="palette-close-btn" type="button" onClick={onClose} aria-label="Close PDF picker"><Icon name="x" size={16} /></button>
           </div>
           <div className="palette-results file-picker-results">
             <section className="palette-command-group" aria-label="Open from device">
@@ -219,17 +220,10 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
 
         <div className="new-doc-page-setup">
           <label>Page size
-            <select className="studio-input" value={pageSize} onChange={(event) => setPageSize(event.target.value)}>
-              <option value="a4">A4</option>
-              <option value="letter">Letter</option>
-              <option value="legal">Legal</option>
-            </select>
+            <ThemedSelect className="studio-input" value={pageSize} onChange={(event) => setPageSize(event.target.value)} options={[{ value: 'a4', label: 'A4' }, { value: 'letter', label: 'Letter' }, { value: 'legal', label: 'Legal' }]} />
           </label>
           <label>Orientation
-            <select className="studio-input" value={orientation} onChange={(event) => setOrientation(event.target.value)}>
-              <option value="portrait">Portrait</option>
-              <option value="landscape">Landscape</option>
-            </select>
+            <ThemedSelect className="studio-input" value={orientation} onChange={(event) => setOrientation(event.target.value)} options={[{ value: 'portrait', label: 'Portrait' }, { value: 'landscape', label: 'Landscape' }]} />
           </label>
           <label>Pages
             <input className="studio-input" type="number" min="1" max="500" value={pageCount} onChange={(event) => setPageCount(Math.max(1, Math.min(500, Number(event.target.value) || 1)))} />

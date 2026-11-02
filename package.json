@@ -1,17 +1,21 @@
 {
   "name": "pdf-dock-desktop",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "private": true,
   "productName": "PDF Dock",
   "description": "A clean desktop PDF workspace.",
   "main": "electron/main.cjs",
+  "bin": {
+    "pdf-dock": "bin/pdf-dock.mjs"
+  },
   "scripts": {
+    "cli": "node ./bin/pdf-dock.mjs",
     "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http://127.0.0.1:5174 && node scripts/launch-electron.cjs\"",
     "build": "vite build",
     "check": "npm run build",
-    "package:mac": "npm run build && electron-builder --mac --x64 --arm64 --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64 --publish never",
     "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs",
+    "test": "node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-simple-text-safety.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-keyboard-shortcuts.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs && node scripts/test-updater.mjs && node scripts/test-render-budget.mjs && node scripts/test-select-mode-regressions.cjs",
     "test:repairs": "node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs"
   },
   "dependencies": {
@@ -26,7 +30,7 @@
     "@pdf-lib/fontkit": "^1.1.1",
     "docx": "^9.8.1",
     "docx-preview": "0.4.1",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.8.11",
     "jszip": "^3.10.2",
     "mammoth": "^1.13.0",
     "pdf-lib": "^1.17.1",
@@ -48,15 +52,6 @@
     "wait-on": "^8.0.4"
   },
   "build": {
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Noobcode20",
-        "repo": "PDF-Dock",
-        "channel": "beta",
-        "releaseType": "prerelease"
-      }
-    ],
     "appId": "com.pdfdock.app",
     "productName": "PDF Dock",
     "directories": {
@@ -68,10 +63,28 @@
       "assets/pdf-dock.png",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "bin/pdf-dock.mjs",
+        "to": "cli/pdf-dock.mjs"
+      },
+      {
+        "from": "skills/pdf-dock/SKILL.md",
+        "to": "cli/SKILL.md"
+      }
+    ],
     "asar": true,
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF document",
+        "description": "PDF document",
+        "mimeType": "application/pdf",
+        "role": "Viewer"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
-      "identity": "-",
       "icon": "assets/pdf-dock.icns",
       "target": [
         {
@@ -105,9 +118,20 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Noobcode20",
+        "repo": "PDF-Dock",
+        "releaseType": "prerelease",
+        "channel": "beta"
+      }
+    ],
+    "detectUpdateChannel": true
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
@@ -115,6 +139,7 @@
     "electron-winstaller@5.4.0": true
   },
   "overrides": {
-    "shell-quote": "^1.12.0"
+    "shell-quote": "^1.12.0",
+    "image-size": "^2.0.3"
   }
 }

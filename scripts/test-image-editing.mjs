@@ -36,7 +36,7 @@ const PAGE_WIDTH = 600;
 const PAGE_HEIGHT = 800;
 const SOURCE_SIZE = 400;
 const standardFontDataUrl =
-  path.resolve("node_modules/pdfjs-dist/standard_fonts") + path.sep;
+  path.resolve('node_modules/pdfjs-dist/standard_fonts').split(path.sep).join('/') + '/';
 
 /* The test image: four solid quadrants, red top-left, green top-right,
  * blue bottom-left, yellow bottom-right. */

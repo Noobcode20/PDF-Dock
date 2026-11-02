@@ -18,6 +18,7 @@ import { FormCandidatesPanel } from '../editor/FormCandidatesPanel'
 import { PropertiesDialog } from '../editor/PropertiesDialog'
 import { SignaturePanel } from '../editor/SignaturePanel'
 import { AnnotationLayer } from '../editor/AnnotationLayer'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { createDocumentSession, revisedSession, isSessionDirty, markSessionSaved } from '../editor/documentSession'
 import { pushHistory, boundHistory } from '../editor/history'
 import { commitOperations } from '../editor/commit'
@@ -31,6 +32,7 @@ import { allTools } from '../toolsData'
 import { forgetPdfCopy, rememberPdf, saveOutput } from '../fileServices'
 import { recentFilesBackend } from '../recentFiles'
 import { Presence } from '../components/Presence'
+import { ConfettiCelebration } from '../components/ConfettiCelebration'
 import { loadShortcuts, matchesShortcut } from '../keyboardShortcuts'
 
 const renderFileIds = new WeakMap()
@@ -52,7 +54,7 @@ const inputAccept = (toolId) => {
 
 const formatBytes = (size) => size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(2)} MB`
 const escapePreviewHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
-const pageSelectionTools = new Set(['delete-pages', 'extract-pages', 'duplicate-pages', 'rotate-pages', 'crop-pdf'])
+const pageSelectionTools = new Set(['split-pdf', 'delete-pages', 'extract-pages', 'duplicate-pages', 'rotate-pages', 'crop-pdf'])
 const aggregateInputTools = new Set(['merge-pdf', 'jpg-to-pdf'])
 const singleDocumentTools = new Set(['pdf-editor'])
 const expandPageSequence = (value, pageCount) => {
@@ -71,7 +73,7 @@ const expandPageSequence = (value, pageCount) => {
   return result
 }
 
-function OrganizePageThumbnail({ file, page, selected, selectable, reorderable, first, last, onToggle, onMove }) {
+function OrganizePageThumbnail({ file, page, selected, selectable, reorderable, first, last, onToggle, onMove, onDuplicate, onRemove, layout = 'grid', canRemove = true, moveOnly = false, sourceLabel = '', orderNumber, dragReorderable = false, onDragStart, onDrop, onDragEnd }) {
   const canvas = useRef(null)
   const [visible, setVisible] = useState(false)
   const [previewError, setPreviewError] = useState(false)
@@ -89,19 +91,21 @@ function OrganizePageThumbnail({ file, page, selected, selectable, reorderable, 
     if (!visible || !canvas.current) return
     const target = canvas.current, job = new AbortController()
     setPreviewError(false)
-    import('../pdfEngine').then(({ renderPdfThumbnail }) => job.signal.aborted ? null : renderPdfThumbnail(file, page, target, 168, 5, { signal: job.signal }))
+    import('../pdfEngine').then(({ renderPdfThumbnail }) => job.signal.aborted ? null : renderPdfThumbnail(file, page, target, 360, 5, { signal: job.signal }))
       .then(result => { if (!job.signal.aborted && result?.status === 'FAILED') setPreviewError(true) })
       .catch(() => { if (!job.signal.aborted) setPreviewError(true) })
     return () => { job.abort(); target.width = 0; target.height = 0 }
   }, [file, page, visible])
-  return <article className={`organize-page-card ${selected ? 'is-selected' : ''}`}>
-    <button className="organize-page-select" type="button" onClick={onToggle} aria-pressed={selectable ? selected : undefined} aria-label={selectable ? `${selected ? 'Deselect' : 'Select'} page ${page}` : `Preview page ${page}`} disabled={!selectable}>
-      <span className="organize-page-paper"><canvas ref={canvas} />{previewError && <span className="thumbnail-error" role="img" aria-label={`Preview unavailable for page ${page}`}><Icon name="file" size={18} /></span>}<span className="organize-page-check"><Icon name="check" size={13} /></span></span>
-      <span className="organize-page-meta"><strong>Page {page}</strong><small>{selected ? 'Selected' : reorderable ? 'Use arrows to move' : selectable ? 'Click to select' : 'Preview'}</small></span>
+  const previewLabel = `Preview ${sourceLabel ? `${sourceLabel}, ` : ''}page ${page}`
+  const pageActionLabel = selectable ? `${selected ? 'Deselect' : 'Select'} page ${page}` : previewLabel
+  return <article className={`organize-page-card ${selected ? 'is-selected' : ''} ${reorderable ? 'is-reorderable' : ''} ${layout === 'list' ? 'is-list-item' : ''}`} draggable={dragReorderable} onDragStart={(event) => { if (dragReorderable) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', 'page'); onDragStart?.(event) } }} onDragOver={(event) => { if (dragReorderable) event.preventDefault() }} onDrop={(event) => { if (dragReorderable) { event.preventDefault(); onDrop?.(event) } }} onDragEnd={onDragEnd}>
+    <button className="organize-page-select" type="button" onClick={onToggle} aria-pressed={selectable ? selected : undefined} aria-label={pageActionLabel} disabled={!selectable}>
+      <span className="organize-page-paper"><canvas ref={canvas} />{previewError && <span className="thumbnail-error" role="img" aria-label={`Preview unavailable for page ${page}`}><Icon name="file" size={18} /></span>}{reorderable && <><span className="organize-page-grip" aria-hidden="true">⠿</span><span className="organize-page-number">{orderNumber ?? page}</span></>}<span className="organize-page-check"><Icon name="check" size={13} /></span></span>
+      <span className="organize-page-meta"><strong>{sourceLabel ? `${sourceLabel} · ` : ''}Page {page}</strong><small>{selected ? 'Selected' : reorderable ? 'Use arrows to move' : selectable ? 'Click to select' : 'Preview'}</small></span>
     </button>
-    {reorderable && <div className="organize-page-order" aria-label={`Reorder page ${page}`}>
-      <button type="button" onClick={() => onMove(-1)} disabled={first} aria-label={`Move page ${page} earlier`}><Icon name="arrowLeft" size={13} /></button>
-      <button type="button" onClick={() => onMove(1)} disabled={last} aria-label={`Move page ${page} later`}><Icon name="arrow" size={13} /></button>
+    {reorderable && <div className={`organize-page-order ${moveOnly ? 'is-move-only' : ''}`} aria-label={`${sourceLabel ? `${sourceLabel}, ` : ''}page ${page} actions`}>
+      {!moveOnly && <div className="organize-page-order-primary"><button type="button" onClick={onDuplicate} aria-label={`Duplicate page ${page}`} title="Duplicate page"><Icon name="copy" size={17} /></button><button type="button" onClick={onRemove} disabled={!canRemove} aria-label={`Delete page ${page}`} title="Delete page"><Icon name="trash" size={17} /></button></div>}
+      <div className="organize-page-order-move"><button type="button" onClick={() => onMove(-1)} disabled={first} aria-label={`Move ${sourceLabel ? `${sourceLabel} ` : ''}page ${page} earlier`}><Icon name="arrowLeft" size={17} /></button><button type="button" onClick={() => onMove(1)} disabled={last} aria-label={`Move ${sourceLabel ? `${sourceLabel} ` : ''}page ${page} later`}><Icon name="arrow" size={17} /></button></div>
     </div>}
   </article>
 }
@@ -174,10 +178,10 @@ function OutputDocxPreview({ data, title }) {
 }
 
 const createInitialOptions = () => ({
-  pages: '', ranges: '1-3', splitMode: 'ranges', rotation: 90, watermarkText: 'CONFIDENTIAL',
+  pages: '', ranges: '1-3', splitMode: 'ranges', extractMode: 'selected', rotation: 90, watermarkText: 'CONFIDENTIAL',
   opacity: 35, angle: 45, position: 'bottom-center', startNumber: 1, format: '{n}', dpi: 144,
   quality: 'recommended', unit: 'mm', margins: { top: 10, right: 15, bottom: 10, left: 15 },
-  language: 'eng', ocrDpi: 200,
+  language: 'eng', ocrDpi: 200, mergeMode: 'sequential',
   signature: '', annotationText: '', password: '', confirmPassword: '', pageSize: 'a4',
   redactPage: '1', redactX: 0, redactY: 0, redactWidth: 0, redactHeight: 0,
   signaturePage: '1', annotationPage: '1', bookmarksText: '',
@@ -193,11 +197,14 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
   const [message, setMessage] = useState(() => restoredDraft?.message || '')
   const [error, setError] = useState(() => restoredDraft?.error || '')
   const [outputs, setOutputs] = useState(() => restoredDraft?.outputs || [])
+  const [celebrationId, setCelebrationId] = useState(0)
   const [preview, setPreview] = useState(null)
   const previewUrl = useRef(null)
   const savingRef = useRef(false)
   const [pageCount, setPageCount] = useState(null)
   const [pageSizes, setPageSizes] = useState([])
+  const [mergePageData, setMergePageData] = useState({ items: [], loading: false, error: '' })
+  const mergePageDragSource = useRef(null)
   const [formFields, setFormFields] = useState([])
   const [progress, setProgress] = useState(null)
   const [redactMarked, setRedactMarked] = useState(() => restoredDraft?.redactMarked || false)
@@ -211,6 +218,7 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
   const [filePickerBusy, setFilePickerBusy] = useState(false)
   const [selectedPages, setSelectedPages] = useState(() => restoredDraft?.selectedPages || [])
   const [pageOrder, setPageOrder] = useState(() => restoredDraft?.pageOrder || [])
+  const [organizeLayout, setOrganizeLayout] = useState('grid')
   const jobId = useRef(0)
   const jobController = useRef(null)
   const jobInputs = useRef(null)
@@ -268,6 +276,57 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
     return () => { active = false }
   }, [files])
 
+  useEffect(() => {
+    if (toolId !== 'merge-pdf' || options.mergeMode !== 'custom' || !files.length) {
+      setMergePageData({ items: [], loading: false, error: '' })
+      return undefined
+    }
+    let active = true
+    setMergePageData({ items: [], loading: true, error: '' })
+    import('../pdfEngine').then(async ({ inspectPdfOverview }) => {
+      const results = await Promise.all(files.map(async (file) => {
+        try {
+          const info = await inspectPdfOverview(file)
+          return { file, fileKey: pdfFileIdentity(file), pageCount: info.pageCount }
+        } catch (cause) {
+          return { file, fileKey: pdfFileIdentity(file), pageCount: 0, error: cause?.message || `Could not read ${file.name}.` }
+        }
+      }))
+      if (!active) return
+      const items = results.flatMap(({ file, fileKey, pageCount: count }) => Array.from({ length: count }, (_, index) => ({ file, fileKey, page: index + 1, key: `${fileKey}:${index + 1}` })))
+      const errors = results.filter((result) => result.error).map((result) => `${result.file.name}: ${result.error}`)
+      setMergePageData({ items, loading: false, error: errors.join(' ') })
+    }).catch((cause) => {
+      if (active) setMergePageData({ items: [], loading: false, error: cause?.message || 'Could not load PDF pages.' })
+    })
+    return () => { active = false }
+  }, [toolId, options.mergeMode, files])
+
+  const mergePageItems = mergePageData.items
+  const mergePageDefaultOrder = useMemo(() => mergePageItems.map(({ fileKey, page }) => ({ fileKey, page })), [mergePageItems])
+  const mergePageItemByKey = useMemo(() => new Map(mergePageItems.map((item) => [item.key, item])), [mergePageItems])
+  const mergePageOrder = Array.isArray(options.mergePageOrder) && options.mergePageOrder.length ? options.mergePageOrder : mergePageDefaultOrder
+
+  useEffect(() => {
+    if (toolId !== 'merge-pdf' || options.mergeMode !== 'custom' || !mergePageItems.length) return
+    const available = new Set(mergePageItems.map((item) => item.key))
+    setOptions((current) => {
+      const existing = Array.isArray(current.mergePageOrder) ? current.mergePageOrder : []
+      const next = []
+      const seen = new Set()
+      for (const page of existing) {
+        const key = `${page.fileKey}:${page.page}`
+        if (available.has(key) && !seen.has(key)) { next.push(page); seen.add(key) }
+      }
+      for (const page of mergePageDefaultOrder) {
+        const key = `${page.fileKey}:${page.page}`
+        if (!seen.has(key)) { next.push(page); seen.add(key) }
+      }
+      if (next.length === existing.length && next.every((page, index) => page.fileKey === existing[index]?.fileKey && page.page === existing[index]?.page)) return current
+      return { ...current, mergePageOrder: next }
+    })
+  }, [toolId, options.mergeMode, mergePageItems, mergePageDefaultOrder])
+
   const pageIdentity = files.map(renderFileId).join('|')
   const previousPageIdentity = useRef(pageIdentity)
   const initialPageIdentity = useRef(pageIdentity)
@@ -291,17 +350,20 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
       const parsed = expandPageSequence(options.pages, pageCount)
       if (parsed) setPageOrder(parsed)
     } else if (pageSelectionTools.has(toolId)) {
-      const parsed = expandPageSequence(options.pages, pageCount)
+      if ((toolId === 'split-pdf' && options.splitMode === 'each') || (toolId === 'extract-pages' && options.extractMode === 'each')) {
+        setSelectedPages([])
+        return
+      }
+      const selection = toolId === 'split-pdf' ? options.ranges : options.pages
+      const parsed = expandPageSequence(selection, pageCount)
       setSelectedPages(parsed ? [...new Set(parsed)] : [])
     }
-  }, [toolId, options.pages, pageCount])
+  }, [toolId, options.pages, options.ranges, options.splitMode, options.extractMode, pageCount])
 
   const togglePage = (page) => {
-    setSelectedPages((current) => {
-      const next = current.includes(page) ? current.filter((number) => number !== page) : [...current, page].sort((a, b) => a - b)
-      setOptions((existing) => ({ ...existing, pages: next.join(', ') }))
-      return next
-    })
+    const next = selectedPages.includes(page) ? selectedPages.filter((number) => number !== page) : [...selectedPages, page].sort((a, b) => a - b)
+    setSelectedPages(next)
+    setOption(toolId === 'split-pdf' ? 'ranges' : 'pages', next.join(', '))
   }
 
   const movePage = (page, offset, occurrence = 0) => {
@@ -315,6 +377,21 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
       return next
     })
   }
+
+  const editOrganizeOrder = (next) => {
+    setPageOrder(next)
+    setOption('pages', next.join(', '))
+  }
+  const duplicateOrganizePage = (index) => editOrganizeOrder([...pageOrder.slice(0, index + 1), pageOrder[index], ...pageOrder.slice(index + 1)])
+  const removeOrganizePage = (index) => editOrganizeOrder(pageOrder.filter((_, position) => position !== index))
+  const reorderMergePage = (sourceIndex, targetIndex) => {
+    const next = [...mergePageOrder]
+    if (sourceIndex < 0 || sourceIndex >= next.length || targetIndex < 0 || targetIndex >= next.length || sourceIndex === targetIndex) return
+    const [page] = next.splice(sourceIndex, 1)
+    next.splice(targetIndex, 0, page)
+    setOption('mergePageOrder', next)
+  }
+  const moveMergePage = (index, offset) => reorderMergePage(index, index + offset)
 
   useEffect(() => {
     let active = true
@@ -333,7 +410,14 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
     const picked = Array.from(incoming || [])
     if (!picked.length) return
     const multi = aggregateInputTools.has(tool.id) || !singleDocumentTools.has(tool.id)
-    const next = multi ? [...files, ...picked] : picked.slice(0, 1)
+    const sameFile = (left, right) => left.name === right.name && left.size === right.size
+    const next = tool.id === 'merge-pdf'
+      ? picked.reduce((current, file) => {
+        const existingIndex = current.findIndex((entry) => sameFile(entry, file))
+        if (existingIndex >= 0) return current.filter((_, index) => index !== existingIndex)
+        return [...current, file]
+      }, [...files])
+      : multi ? [...files, ...picked] : picked.slice(0, 1)
     const allowed = next.find((file) => !accepts(toolId, file))
     if (allowed) {
       setError(`“${allowed.name}” is not a supported file for ${tool.name}.`)
@@ -369,6 +453,17 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
   }
 
   const filteredRecentFiles = recentFiles.filter((record) => record?.name?.toLowerCase().includes(fileSearch.trim().toLowerCase()) && accepts(toolId, { name: record.name, type: 'application/pdf' }))
+  useEffect(() => {
+    if (!fileSelectorOpen) return undefined
+    const closeOnEscape = (event) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setFileSelectorOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape, true)
+    return () => window.removeEventListener('keydown', closeOnEscape, true)
+  }, [fileSelectorOpen])
   useEffect(() => {
     if (fileSelectorOpen) document.querySelector(`[data-file-picker-index="${filePickerActiveIndex}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [fileSelectorOpen, filePickerActiveIndex, filteredRecentFiles.length])
@@ -431,6 +526,7 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
       if (controller.signal.aborted || jobInputs.current.files !== source.files || jobInputs.current.toolId !== source.toolId || jobInputs.current.options !== source.options) {setProgress(null);setMessage('Inputs changed during processing. Run the tool again.');return []}
       const nextOutputs = result.outputs || []
       setOutputs(nextOutputs)
+      if (nextOutputs.length) setCelebrationId((id) => id + 1)
       onDirtyChange(nextOutputs.length > 0 || (toolId === 'redact-pdf' && redactMarked))
       setMessage(result.message || `${nextOutputs.length} output file${nextOutputs.length === 1 ? '' : 's'} ready.`)
       setProgress(null)
@@ -585,12 +681,13 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
   const isMergeEmpty = tool.id === 'merge-pdf' && files.length === 0
 
   return (
+    <>
+    <ConfettiCelebration active={celebrationId > 0} key={celebrationId} />
     <div className={`page-content tool-studio-page ${tool.category === 'organize' ? 'organize-tool-page' : ''} ${tool.id === 'merge-pdf' ? 'merge-tool-page' : ''}`}>
       <div className="studio-header">
         <span className={`tool-icon ${tool.tone} studio-main-icon`}><Icon name={tool.icon} size={25} /></span>
         <div className="studio-header-details">
           <div className="studio-title-row"><h1>{tool.name}</h1></div>
-          <p className="studio-description">{tool.description}</p>
         </div>
       </div>
 
@@ -618,20 +715,34 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
                   <button className="remove-file-button" type="button" aria-label="Remove file" title="Remove file" onClick={() => onBeforeDiscard(() => { setFiles([]); setPageCount(null); setOutputs([]); setError(''); setMessage(''); onDirtyChange(false) })}><Icon name="trash" size={16} /></button>
                 </div>
               </div>
-              {files.length > 1 && <ol className="selected-file-list">{files.map((file, index) => <li key={`${file.name}-${index}`}><span>{index + 1}. {file.name}</span><div className="file-order-actions">{tool.category === 'convert' && <button type="button" className="source-preview-button" onClick={() => previewInput(file)}>Preview</button>}<button type="button" aria-label={`Move ${file.name} up`} disabled={index === 0} onClick={() => { setOutputs([]); setFiles((current) => moveFile(current, index, -1)) }}>↑</button><button type="button" aria-label={`Move ${file.name} down`} disabled={index === files.length - 1} onClick={() => { setOutputs([]); setFiles((current) => moveFile(current, index, 1)) }}>↓</button><button type="button" aria-label={`Remove ${file.name}`} onClick={() => { setOutputs([]); setFiles((current) => current.filter((_, i) => i !== index)) }}>×</button></div></li>)}</ol>}
+              {(files.length > 1 || tool.id === 'merge-pdf') && <ol className="selected-file-list">{files.map((file, index) => <li key={`${file.name}-${index}`}><span>{index + 1}. {file.name}</span><div className="file-order-actions">{tool.category === 'convert' && <button type="button" className="source-preview-button" onClick={() => previewInput(file)}>Preview</button>}<button type="button" aria-label={`Move ${file.name} up`} disabled={index === 0} onClick={() => { setOutputs([]); setFiles((current) => moveFile(current, index, -1)) }}>↑</button><button type="button" aria-label={`Move ${file.name} down`} disabled={index === files.length - 1} onClick={() => { setOutputs([]); setFiles((current) => moveFile(current, index, 1)) }}>↓</button><button type="button" aria-label={`Remove ${file.name}`} onClick={() => { setOutputs([]); setFiles((current) => current.filter((_, i) => i !== index)) }}>×</button></div></li>)}</ol>}
+              {tool.id === 'merge-pdf' && options.mergeMode === 'custom' && <section className="organize-pages-workspace merge-custom-order-workspace" aria-label="Custom page order">
+                <div className="organize-pages-heading"><div><h2>Custom page order</h2><p>Drag pages into place, or use the arrows to move them one position at a time.</p></div><div className="organize-page-count"><strong>{mergePageOrder.length}</strong><span>pages</span></div></div>
+                <div className="organize-pages-toolbar"><span>Final merge sequence</span><button type="button" disabled={!mergePageDefaultOrder.length} onClick={() => setOption('mergePageOrder', mergePageDefaultOrder)}>Restore original order</button></div>
+                {mergePageData.loading && <div className="operation-message" role="status">Loading pages from the selected PDFs…</div>}
+                {mergePageData.error && <div className="operation-error" role="alert">{mergePageData.error}</div>}
+                {!mergePageData.loading && !mergePageData.items.length && !mergePageData.error && <div className="operation-message" role="status">No PDF pages are available to arrange.</div>}
+                <div className="organize-page-grid merge-custom-page-grid">
+                  {mergePageOrder.map((pageRef, index) => {
+                    const item = mergePageItemByKey.get(`${pageRef.fileKey}:${pageRef.page}`)
+                    if (!item) return null
+                    return <OrganizePageThumbnail key={item.key} file={item.file} page={item.page} sourceLabel={item.file.name} orderNumber={index + 1} selected={false} selectable={false} reorderable first={index === 0} last={index === mergePageOrder.length - 1} moveOnly dragReorderable onMove={(offset) => moveMergePage(index, offset)} onDragStart={() => { mergePageDragSource.current = index }} onDrop={() => { reorderMergePage(mergePageDragSource.current, index); mergePageDragSource.current = null }} onDragEnd={() => { mergePageDragSource.current = null }} />
+                  })}
+                </div>
+              </section>}
               {!singleDocumentTools.has(toolId) && <button className="browse-button add-file-button" type="button" onClick={openFileSelector}><Icon name="plus" size={16} /> Add file</button>}
               {tool.category === 'organize' && pageCount && tool.id !== 'merge-pdf' && <section className="organize-pages-workspace" aria-label="PDF pages">
                 <div className="organize-pages-heading">
-                  <div><span className="organize-eyebrow">PAGE WORKSPACE</span><h2>{tool.id === 'organize-pdf' ? 'Arrange your pages' : 'Choose pages'}</h2><p>{tool.id === 'organize-pdf' ? 'Use the arrows on each page to set the final order.' : 'Select thumbnails to apply this action to specific pages.'}</p></div>
-                  <div className="organize-page-count"><strong>{pageCount}</strong><span>{pageCount === 1 ? 'page' : 'pages'}</span></div>
+                  <div><h2>{tool.id === 'organize-pdf' ? 'Page workspace' : 'Choose pages'}</h2><p>{tool.id === 'organize-pdf' ? 'Arrange pages using the arrow buttons, or enter a custom sequence.' : 'Select thumbnails to apply this action to specific pages.'}</p></div>
+                  <div className="organize-workspace-tools"><span>{pageCount} pages</span>{tool.id === 'organize-pdf' && <div className="organize-view-toggle" role="group" aria-label="Page layout"><button type="button" className={organizeLayout === 'grid' ? 'active' : ''} aria-pressed={organizeLayout === 'grid'} onClick={() => setOrganizeLayout('grid')}><Icon name="grid" size={16} />Grid</button><button type="button" className={organizeLayout === 'list' ? 'active' : ''} aria-pressed={organizeLayout === 'list'} onClick={() => setOrganizeLayout('list')}><Icon name="menu" size={16} />List</button></div>}</div>
                 </div>
                 <div className="organize-pages-toolbar">
                   <span>{tool.id === 'organize-pdf' ? 'Final sequence' : selectedPages.length ? `${selectedPages.length} selected` : ['rotate-pages', 'crop-pdf'].includes(tool.id) ? 'All pages' : tool.id === 'split-pdf' ? 'Set page ranges in the options' : 'Choose pages to continue'}</span>
                   {pageSelectionTools.has(tool.id) && selectedPages.length > 0 && <button type="button" onClick={() => { setSelectedPages([]); setOptions((current) => ({ ...current, pages: '' })) }}>Clear selection</button>}
                   {tool.id === 'organize-pdf' && <button type="button" onClick={() => { const original = Array.from({ length: pageCount }, (_, index) => index + 1); setPageOrder(original); setOption('pages', '') }}>Restore original order</button>}
                 </div>
-                <div className="organize-page-grid">
-                  {(tool.id === 'organize-pdf' ? pageOrder : Array.from({ length: pageCount }, (_, index) => index + 1)).map((page, index, visiblePages) => <OrganizePageThumbnail key={`${page}-${index}`} file={files[0]} page={page} selected={selectedPages.includes(page)} selectable={pageSelectionTools.has(tool.id)} reorderable={tool.id === 'organize-pdf'} first={index === 0} last={index === visiblePages.length - 1} onToggle={() => togglePage(page)} onMove={(offset) => movePage(page, offset, pageOrder.slice(0, index + 1).filter((value) => value === page).length - 1)} />)}
+                <div className={`organize-page-grid ${tool.id === 'organize-pdf' ? `is-${organizeLayout}` : ''}`}>
+                  {(tool.id === 'organize-pdf' ? pageOrder : Array.from({ length: pageCount }, (_, index) => index + 1)).map((page, index, visiblePages) => <OrganizePageThumbnail key={`${page}-${index}`} file={files[0]} page={page} selected={selectedPages.includes(page)} selectable={pageSelectionTools.has(tool.id) && !((tool.id === 'split-pdf' && options.splitMode === 'each') || (tool.id === 'extract-pages' && options.extractMode === 'each'))} reorderable={tool.id === 'organize-pdf'} first={index === 0} last={index === visiblePages.length - 1} onToggle={() => togglePage(page)} onMove={(offset) => movePage(page, offset, pageOrder.slice(0, index + 1).filter((value) => value === page).length - 1)} onDuplicate={() => duplicateOrganizePage(index)} onRemove={() => removeOrganizePage(index)} canRemove={pageOrder.length > 1} layout={organizeLayout} />)}
                 </div>
               </section>}
               {pageCount && <div className="document-summary"><Icon name="pages" size={16} /><div><span className="document-summary-title">PDF loaded and readable</span><span>{pageCount} page{pageCount === 1 ? '' : 's'} · {formatBytes(files[0].size)}</span></div></div>}
@@ -657,7 +768,7 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
           <div className="panel-title-row"><Icon name="sliders" size={16} /><h3>{tool.category === 'organize' ? 'Operation settings' : 'Options'}</h3></div>
           <ToolOptions toolId={toolId} options={options} setOption={setOption} pageCount={pageCount} formFields={formFields} />
           <div className="studio-action-buttons">
-            {files.length > 0 && <button className="primary-action-btn" type="button" onClick={() => outputs.length ? onBeforeDiscard(() => { void run() }) : run()} disabled={busy}>{busy && <span className="btn-spinner" />}<span>{busy ? 'Processing…' : tool.actionName}</span></button>}
+            {files.length > 0 && <button className="primary-action-btn" type="button" onClick={() => outputs.length ? onBeforeDiscard(() => { void run() }) : run()} disabled={busy || (tool.id === 'merge-pdf' && options.mergeMode === 'custom' && (mergePageData.loading || Boolean(mergePageData.error) || !mergePageOrder.length))}>{busy && <span className="btn-spinner" />}<span>{busy ? 'Processing…' : tool.actionName}</span></button>}
             {files.length > 0 && <button className="reset-button" type="button" onClick={() => onBeforeDiscard(() => { setOptions(createInitialOptions()); if (pageCount) setPageOrder(Array.from({ length: pageCount }, (_, index) => index + 1)); setSelectedPages([]); setRedactMarked(false); setError(''); setMessage(''); setOutputs([]); onDirtyChange(false) })}>Reset options</button>}
           </div>
         </aside>}
@@ -669,7 +780,7 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
             <div className="palette-search-row">
               <Icon name="search" size={18} className="palette-search-icon" />
               <input className="palette-input" autoFocus type="search" placeholder="Search recent files…" value={fileSearch} onChange={(event) => { setFileSearch(event.target.value); setFilePickerActiveIndex(0); setFilePickerKeyboardNav(false) }} aria-label="Search recent files" />
-              <button className="palette-close-btn" type="button" onClick={() => setFileSelectorOpen(false)} aria-label="Close file selector"><kbd>Esc</kbd></button>
+              <button className="palette-close-btn" type="button" onClick={() => setFileSelectorOpen(false)} aria-label="Close file selector"><Icon name="x" size={16} /></button>
             </div>
             <div className="palette-results file-picker-results">
               <section className="palette-command-group">
@@ -686,11 +797,11 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
                 </div>}
                 {filteredRecentFiles.length > 0 ? <>
                   <div className="palette-section-title">Recent files <span>{filteredRecentFiles.length}</span></div>
-                  <div className="palette-list" id="file-picker-results">{filteredRecentFiles.map((record, index) => <button key={record.id} data-file-picker-index={index} className={`palette-item ${filePickerActiveIndex === index ? 'active' : ''}`} type="button" aria-current={filePickerActiveIndex === index ? 'true' : undefined} onMouseEnter={() => setFilePickerActiveIndex(index)} onClick={() => openRecentFile(record)} disabled={filePickerBusy}>
+                  <div className="palette-list" id="file-picker-results">{filteredRecentFiles.map((record, index) => { const selected = files.some((file) => file.name === record.name && file.size === record.size); return <button key={record.id} data-file-picker-index={index} className={`palette-item ${filePickerActiveIndex === index ? 'active' : ''} ${selected ? 'is-selected' : ''}`} type="button" aria-current={filePickerActiveIndex === index ? 'true' : undefined} aria-pressed={selected} onMouseEnter={() => setFilePickerActiveIndex(index)} onClick={() => openRecentFile(record)} disabled={filePickerBusy}>
                     <span className="tool-icon neutral palette-item-icon"><Icon name="file" size={18} /></span>
                     <div className="palette-item-text"><div className="palette-item-title-row"><strong>{record.name}</strong></div><small>{record.size ? `${Math.max(1, Math.round(record.size / 1024))} KB` : 'PDF document'}</small></div>
                     <Icon name="arrow" size={14} className="palette-item-arrow" />
-                  </button>)}</div>
+                  </button> })}</div>
                 </> : <div className={`file-picker-drop-area ${filePickerDragging ? 'is-dragging' : ''}`} role="button" tabIndex={0} aria-label="Add a file by dropping it here or browsing your device" onClick={() => picker.current?.click()} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); picker.current?.click() } }} onDragEnter={(event) => { event.preventDefault(); setFilePickerDragging(true) }} onDragOver={(event) => { event.preventDefault(); setFilePickerDragging(true) }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFilePickerDragging(false) }} onDrop={handleFilePickerDrop}>
                   <strong><Icon name="plus" size={14} /> Add a file</strong>
                   <span>{fileSearch.trim() ? 'No matching files. Drop a supported file here or click to browse.' : 'Drop a supported file here or click to browse this device.'}</span>
@@ -710,13 +821,14 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePreview() }
             else if (event.key === 'Enter' && !event.repeat && !event.target.closest('button, a, input, textarea, select')) { event.preventDefault(); closePreview() }
           }}>
-            <header className="output-preview-header"><strong title={preview.title}>{preview.title}</strong><button type="button" autoFocus className="palette-close-btn" aria-label="Close preview" onClick={closePreview}><kbd>Esc</kbd></button></header>
+            <header className="output-preview-header"><strong title={preview.title}>{preview.title}</strong><button type="button" autoFocus className="palette-close-btn" aria-label="Close preview" onClick={closePreview}><Icon name="x" size={16} /></button></header>
             {preview.mimeType === 'application/pdf' ? <OutputPdfPreview file={preview.file} /> : preview.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? <OutputDocxPreview data={preview.data} title={preview.title} /> : preview.mimeType.startsWith('image/') ? <div className="output-preview-image-wrap"><img className="output-preview-image" src={preview.url} alt={preview.title} /></div> : <iframe className="output-preview-frame" title={`Preview of ${preview.title}`} srcDoc={preview.html} sandbox="" />}
           </section>
         </div>}
       </Presence>
 
     </div>
+    </>
   )
 }
 
@@ -831,6 +943,8 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const imagePicker = useRef(null)
   const insertPicker = useRef(null)
   const [selectedOrganizerPage,setSelectedOrganizerPage] = useState(0)
+  const [selectedOrganizerPages,setSelectedOrganizerPages] = useState([0])
+  const organizerAnchorPage = useRef(0)
   const [selectedImage, setSelectedImage] = useState(() => editorDraft?.selectedImage || null)
   const [editHistory, setEditHistory] = useState(() => editorDraft?.editHistory || { past: [], future: [] })
   const currentEditSnapshot = useRef({ files: restoredFiles, revision: session.revision, annotations:editorDraft?.annotations||[], textEdits: editorDraft?.textEdits || [], imageEdits: editorDraft?.imageEdits || [], redaction: Array.isArray(editorDraft?.redaction) ? editorDraft.redaction : editorDraft?.redaction ? [{ ...editorDraft.redaction, page: Number(editorDraft.redaction.page) || 1 }] : [], options: editorDraft?.options || createInitialOptions() })
@@ -857,7 +971,13 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const [editorMenuTab, setEditorMenuTab] = useState(() => SECURE_EDITOR_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'secure' : INSERT_EDITOR_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'insert' : PDF_EXPORT_TOOLS.some(([id]) => id === (editorDraft?.toolId || initialTool)) ? 'export' : 'home')
   const [editorSearchExpanded, setEditorSearchExpanded] = useState(() => Boolean(editorDraft?.viewerState?.searchQuery))
   // Phones start with the side panels folded away so the document keeps the room.
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 560px)').matches)
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 760px)')
+    const adapt = () => { if (narrow.matches) setRightSidebarCollapsed(true) }
+    narrow.addEventListener('change', adapt)
+    return () => narrow.removeEventListener('change', adapt)
+  }, [])
   useEffect(() => {
     const root = editorWorkspaceRef.current
     const tooltip = editorTooltipRef.current
@@ -1042,7 +1162,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   useEffect(() => {
     let active = true
     if (!file) { setPageCount(0); setPageSizes([]); return () => { active = false } }
-    import('../pdfEngine').then(({ inspectPdfOverview }) => inspectPdfOverview(file)).then((info) => { if (active) { setPageCount(info.pageCount); setPageSizes(info.pages); setSelectedOrganizerPage(current=>Math.min(current,info.pageCount-1)); setViewerPage((current) => Math.min(Math.max(current, 1), info.pageCount)) } })
+    import('../pdfEngine').then(({ inspectPdfOverview }) => inspectPdfOverview(file)).then((info) => { if (active) { setPageCount(info.pageCount); setPageSizes(info.pages); setSelectedOrganizerPage(current=>Math.min(current,info.pageCount-1)); setSelectedOrganizerPages(current=>current.filter(page=>page<info.pageCount).length ? current.filter(page=>page<info.pageCount) : [0]); setViewerPage((current) => Math.min(Math.max(current, 1), info.pageCount)) } })
       .catch((cause) => { if (active) setError(cause.message || 'Could not read this PDF.') })
     if (toolId === 'redact-pdf') forgetPdfCopy(file).catch(() => {})
     const historyTimer = toolId === 'redact-pdf' ? null : window.setTimeout(() => rememberPdf(file).catch(() => {}), 1000)
@@ -1167,8 +1287,6 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   useImperativeHandle(editorRef, () => ({ applyChangesInApp, savePendingEdits, discardPendingEdits, printPdf, saveAs:saveCurrentToDevice, activateTool }), [busy, outputs, textEdits, imageEdits, redaction, toolId, options, files])
   useEffect(() => {
     const handleSaveShortcut = (event) => {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase()==='s') { event.preventDefault(); void saveCurrentToDevice(); return }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==='p') { event.preventDefault(); void printPdf(); return }
       if (event.isComposing || !matchesShortcut(event, loadShortcuts()['save-export'], window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || ''))) return
       event.preventDefault()
       void savePendingEdits()
@@ -1223,6 +1341,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     if (tab === 'secure' && !SECURE_EDITOR_TOOLS.some(([id]) => id === toolId)) { setToolId('protect-pdf'); setTextEditMode(false) }
   }
   const selectTextObject = () => {
+    selectEditorMenuTab('home')
     setToolId('edit-text')
     setTextEditMode(true)
     setError('')
@@ -1237,6 +1356,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   /* A double click on an image opens the image inspector for it. The image
    * itself is never moved, duplicated or transformed by the double click. */
   const openImageInspector = (image) => {
+    selectEditorMenuTab('home')
     if (toolId !== 'images') activateEditorTool('images')
     selectImageObject(image)
   }
@@ -1414,6 +1534,29 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     window.dispatchEvent(new CustomEvent('pdf-editor-open-search'))
     requestAnimationFrame(() => editorSearchInputRef.current?.focus())
   }
+  const selectOrganizerPage = (index, event = {}) => {
+    const count = pageCount || 0
+    let next
+    if (event.shiftKey) {
+      const anchor = organizerAnchorPage.current
+      next = Array.from({ length: Math.abs(index - anchor) + 1 }, (_, offset) => Math.min(index, anchor) + offset)
+    } else if (event.metaKey || event.ctrlKey) {
+      next = selectedOrganizerPages.includes(index)
+        ? selectedOrganizerPages.filter((page) => page !== index)
+        : [...selectedOrganizerPages, index].sort((a, b) => a - b)
+      organizerAnchorPage.current = index
+    } else {
+      next = [index]
+      organizerAnchorPage.current = index
+    }
+    next = next.filter((page) => page >= 0 && page < count)
+    setSelectedOrganizerPages(next)
+    if (next.length) setSelectedOrganizerPage(index)
+  }
+  const applyOrganizerAction = (action) => {
+    const targets = [...selectedOrganizerPages].sort((a, b) => ['delete', 'duplicate', 'blank'].includes(action) ? b - a : a - b)
+    void commitCurrent(targets.map((index) => ({ type: 'pages', action, index }))).catch((cause) => setError(cause.message))
+  }
   const editorToolbarTools = editorMenuTab === 'secure' ? SECURE_EDITOR_TOOLS : EDITOR_TOOLBAR_TOOLS
 
   return <main className={`pdf-editor-workspace ${file ? 'has-document' : 'no-document'} ${rightSidebarCollapsed ? 'right-sidebar-collapsed' : ''}`} ref={editorWorkspaceRef} onClickCapture={event => {
@@ -1466,7 +1609,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
         else activateEditorTool(id)
       }}><Icon name={icon} size={17} /></button>)}
     </nav>
-    {editorMenuTab==='organize'? <div className="pdf-editor-options"><div className="editor-options-label"><strong>Format &amp; Object</strong><small>Organize pages · Page {selectedOrganizerPage + 1}</small></div>{[['rotate','Rotate 90°'],['duplicate','Duplicate'],['delete','Delete'],['blank','Insert blank']].map(([action,label])=><button className="editor-open-button" key={action} disabled={!file||busy} onClick={()=>void commitCurrent([{type:'pages',action,index:selectedOrganizerPage}]).catch(cause=>setError(cause.message))}>{label}</button>)}<button className="editor-open-button" disabled={!file||busy} onClick={()=>insertPicker.current?.click()}>Insert PDF</button><button className="editor-open-button" disabled={!file||busy} onClick={async()=>{try{const current=await commitCurrent();const {processTool}=await import('../pdfEngine');const result=await processTool({toolId:'extract-pages',files:[current],options:{pages:String(selectedOrganizerPage+1)}});await saveOutput(result.outputs[0])}catch(cause){setError(cause.message)}}}>Extract page</button><input hidden ref={insertPicker} type="file" accept=".pdf,application/pdf" onChange={async event=>{const source=event.target.files?.[0];event.target.value='';if(source)try{await commitCurrent([{type:'insert',index:selectedOrganizerPage,bytes:new Uint8Array(await source.arrayBuffer())}])}catch(cause){setError(cause.message)}}}/></div> : ['home', 'insert'].includes(editorMenuTab) ? <div className={`pdf-editor-options pdf-editor-context-options ${['edit-text', 'add-text'].includes(toolId) ? 'pdf-editor-text-properties' : ''}`}>
+    {editorMenuTab==='organize'? <div className="pdf-editor-options"><div className="editor-options-label"><strong>Format &amp; Object</strong><small>{selectedOrganizerPages.length} page{selectedOrganizerPages.length === 1 ? '' : 's'} selected</small></div>{[['rotate','Rotate 90°'],['duplicate','Duplicate'],['delete','Delete'],['blank','Insert blank']].map(([action,label])=><button className="editor-open-button" key={action} disabled={!file||busy||!selectedOrganizerPages.length} onClick={()=>applyOrganizerAction(action)}>{label}</button>)}<button className="editor-open-button" disabled={!file||busy} onClick={()=>insertPicker.current?.click()}>Insert PDF</button><button className="editor-open-button" disabled={!file||busy||!selectedOrganizerPages.length} onClick={async()=>{try{const current=await commitCurrent();const {processTool}=await import('../pdfEngine');const result=await processTool({toolId:'extract-pages',files:[current],options:{pages:selectedOrganizerPages.map(page=>page+1).sort((a,b)=>a-b).join(',')}});await saveOutput(result.outputs[0])}catch(cause){setError(cause.message)}}}>Extract page{selectedOrganizerPages.length === 1 ? '' : 's'}</button><input hidden ref={insertPicker} type="file" accept=".pdf,application/pdf" onChange={async event=>{const source=event.target.files?.[0];event.target.value='';if(source)try{await commitCurrent([{type:'insert',index:selectedOrganizerPage,bytes:new Uint8Array(await source.arrayBuffer())}])}catch(cause){setError(cause.message)}}}/></div> : ['home', 'insert'].includes(editorMenuTab) ? <div className={`pdf-editor-options pdf-editor-context-options ${['edit-text', 'add-text'].includes(toolId) ? 'pdf-editor-text-properties' : ''}`}>
       <div className="editor-options-label"><strong>{toolId === 'images' ? 'Image' : ['edit-text', 'add-text'].includes(toolId) ? 'Text properties' : 'Format & Object'}</strong>{toolId === 'images' && <small>{selectedImage ? (selectedImage.page ? `Selected on page ${selectedImage.page}` : 'Image selected') : 'No image selected'}</small>}{['edit-text', 'add-text'].includes(toolId) && <small>{toolId === 'add-text' ? 'New text' : 'Selected text'}</small>}</div>
       <div className="editor-options-fields contextual-options-content">
         <div className="contextual-tool-settings">
@@ -1478,9 +1621,9 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
             <section className="text-inspector-section"><h3>Layout</h3><span className="text-inspector-label">Resize the text box by dragging an edge or corner. The text stays inside the box.</span></section>
             <section className="text-inspector-section"><h3>Appearance</h3><label className="text-style-control text-inspector-wide">Opacity <input aria-label="Text opacity" type="range" min="10" max="100" step="5" value={textStyle.opacity ?? 100} onChange={event => setTextStyle(style => ({ ...style, opacity: Number(event.target.value) }))} /><span>{textStyle.opacity ?? 100}%</span></label></section>
             <section className="text-inspector-section text-inspector-typography"><h3>Typography <span aria-hidden="true">⠿</span></h3>
-            <label className="text-style-control">Font <select className="studio-input" value={textStyle.localFontId ? `local:${textStyle.localFontId}` : textStyle.fontFamily} onChange={(event) => void selectTextFont(event.target.value)}>{!PDF_TEXT_FONTS.includes(textStyle.fontFamily) && !textStyle.localFontId && <option value={textStyle.fontFamily}>{textStyle.fontFamily}</option>}{PDF_TEXT_FONTS.map((font) => <option key={font} value={font}>{font}</option>)}{localFonts.map((font) => <option key={font.id} value={`local:${font.id}`}>{font.name} · local</option>)}</select></label>
-            <div className="text-inspector-row"><label className="text-style-control">Weight <select className="studio-input" value={textStyle.bold ? '700' : '400'} onChange={(event) => setTextStyle((style) => ({ ...style, bold: event.target.value === '700' }))}><option value="400">Regular</option><option value="700">Bold</option></select></label><label className="text-style-control">Size <select className="studio-input" value={textStyle.fontSize} onChange={(event) => setTextStyle((style) => ({ ...style, fontSize: Number(event.target.value) }))}>{![8, 10, 12, 14, 16, 18, 24, 32, 48].includes(textStyle.fontSize) && <option value={textStyle.fontSize}>{textStyle.fontSize} pt</option>}{[8, 10, 12, 14, 16, 18, 24, 32, 48].map((size) => <option key={size} value={size}>{size} pt</option>)}</select></label></div>
-            <div className="text-inspector-row"><label className="text-inspector-wide">Line height <select className="studio-input" aria-label="Line height" value={textStyle.lineHeight || 1.2} onChange={event => setTextStyle(style => ({ ...style, lineHeight: Number(event.target.value) }))}><option value="1">100%</option><option value="1.15">115%</option><option value="1.2">120%</option><option value="1.5">150%</option><option value="2">200%</option></select></label><label className="text-inspector-wide">Letter spacing <input aria-label="Letter spacing" type="number" min="-2" max="20" step="0.25" value={textStyle.letterSpacingPt || 0} onChange={event => setTextStyle(style => ({ ...style, letterSpacingPt: Number(event.target.value) }))} /></label></div>
+            <label className="text-style-control">Font <ThemedSelect className="studio-input" value={textStyle.localFontId ? `local:${textStyle.localFontId}` : textStyle.fontFamily} onChange={(event) => void selectTextFont(event.target.value)} options={[...(!PDF_TEXT_FONTS.includes(textStyle.fontFamily) && !textStyle.localFontId ? [{ value: textStyle.fontFamily, label: textStyle.fontFamily }] : []), ...PDF_TEXT_FONTS.map((font) => ({ value: font, label: font })), ...localFonts.map((font) => ({ value: `local:${font.id}`, label: `${font.name} · local` }))]} /></label>
+            <div className="text-inspector-row"><label className="text-style-control">Weight <ThemedSelect className="studio-input" value={textStyle.bold ? '700' : '400'} onChange={(event) => setTextStyle((style) => ({ ...style, bold: event.target.value === '700' }))} options={[{ value: '400', label: 'Regular' }, { value: '700', label: 'Bold' }]} /></label><label className="text-style-control">Size <ThemedSelect className="studio-input" value={textStyle.fontSize} onChange={(event) => setTextStyle((style) => ({ ...style, fontSize: Number(event.target.value) }))} options={[...(![8, 10, 12, 14, 16, 18, 24, 32, 48].includes(textStyle.fontSize) ? [{ value: textStyle.fontSize, label: `${textStyle.fontSize} pt` }] : []), ...[8, 10, 12, 14, 16, 18, 24, 32, 48].map((size) => ({ value: size, label: `${size} pt` }))]} /></label></div>
+            <div className="text-inspector-row"><label className="text-inspector-wide">Line height <ThemedSelect className="studio-input" ariaLabel="Line height" value={textStyle.lineHeight || 1.2} onChange={event => setTextStyle(style => ({ ...style, lineHeight: Number(event.target.value) }))} options={[['1', '100%'], ['1.15', '115%'], ['1.2', '120%'], ['1.5', '150%'], ['2', '200%']].map(([value, label]) => ({ value, label }))} /></label><label className="text-inspector-wide">Letter spacing <input aria-label="Letter spacing" type="number" min="-2" max="20" step="0.25" value={textStyle.letterSpacingPt || 0} onChange={event => setTextStyle(style => ({ ...style, letterSpacingPt: Number(event.target.value) }))} /></label></div>
             <span className="text-inspector-label">Paragraph alignment</span><div className="text-inspector-segment" aria-label="Paragraph alignment">{['left','center','right'].map(alignment => <button type="button" key={alignment} aria-label={`Align ${alignment}`} aria-pressed={(textStyle.alignment || 'left') === alignment} onClick={() => setTextStyle(style => ({ ...style, alignment }))}>{alignment === 'left' ? '≡' : alignment === 'center' ? '☰' : '≋'}</button>)}</div>
             <label className="text-style-control text-inspector-color">Color <input className="text-style-color" aria-label="Text color" type="color" value={textStyle.color} onChange={(event) => setTextStyle((style) => ({ ...style, color: event.target.value }))} /></label>
             <div className="text-inspector-formatting"><button type="button" className={`text-style-toggle ${textStyle.bold ? 'active' : ''}`} aria-pressed={textStyle.bold} onClick={() => setTextStyle((style) => ({ ...style, bold: !style.bold }))}><b>B</b></button><button type="button" className={`text-style-toggle ${textStyle.italic ? 'active' : ''}`} aria-pressed={textStyle.italic} onClick={() => setTextStyle((style) => ({ ...style, italic: !style.italic }))}><i>I</i></button></div>
@@ -1529,16 +1672,16 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     <section className={`pdf-editor-stage ${file ? 'has-document' : 'empty'} ${editorMenuTab === 'organize' ? 'is-organizing' : ''}`} aria-label="PDF page viewer" tabIndex={0} onKeyDown={handlePdfShortcut}>
       {!file ? <button type="button" className="editor-open-empty" onClick={() => onOpenPdf ? onOpenPdf() : picker.current?.click()}><span className="editor-empty-icon"><Icon name="upload" size={24} /></span><strong>Open a PDF to start editing</strong><span>Choose a recent PDF or browse your device.</span><b>Choose PDF</b></button> : <>
         {editorMenuTab === 'organize' && <div className="editor-organizer-grid" ref={organizerRoot} aria-label="All pages">
-          <header className="editor-organizer-heading"><div><span className="editor-organizer-heading-icon" aria-hidden="true" /><h2>All pages</h2></div><span>{selectedOrganizerPage + 1} of {pageCount} selected</span></header>
+          <header className="editor-organizer-heading"><div><span className="editor-organizer-heading-icon" aria-hidden="true" /><h2>All pages</h2></div><span>{selectedOrganizerPages.length} of {pageCount} selected · Shift-click for a range, ⌘/Ctrl-click to add pages</span></header>
           <div className="editor-organizer-cards">
-            {Array.from({ length: pageCount }, (_, index) => <div key={index} className={`editor-organizer-card ${selectedOrganizerPage === index ? 'selected' : ''}`} draggable onDragStart={event => event.dataTransfer.setData('application/pdfking-page', String(index))} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const from = Number(event.dataTransfer.getData('application/pdfking-page')); if (!Number.isInteger(from) || from === index) return; const order = Array.from({ length: pageCount }, (_, pageIndex) => pageIndex); order.splice(index, 0, order.splice(from, 1)[0]); void commitCurrent([{ type: 'pages', action: 'reorder', order }]).catch(cause => setError(cause.message)) }} onClick={() => setSelectedOrganizerPage(index)} onDoubleClick={() => { setViewerPage(index + 1); setToolId('pdf-editor'); setTextEditMode(false); selectEditorMenuTab('home') }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setViewerPage(index + 1); setToolId('pdf-editor'); setTextEditMode(false); selectEditorMenuTab('home') } else if (event.key === ' ') { event.preventDefault(); setSelectedOrganizerPage(index) } }} role="button" tabIndex={0} aria-pressed={selectedOrganizerPage === index} aria-label={`Page ${index + 1}; double click to open in editor`}>
-              <div className="editor-organizer-card-heading"><span>{String(index + 1).padStart(2, '0')}</span>{selectedOrganizerPage === index ? <span className="editor-organizer-selected-mark"><Icon name="check" size={13} /></span> : <span className="editor-organizer-drag-handle" aria-hidden="true" />}</div>
-              <div className="editor-organizer-paper-frame"><PageThumbnail file={file} pageNumber={index + 1} pageSize={pageSizes[index]} root={organizerRoot} /></div>
+            {Array.from({ length: pageCount }, (_, index) => <div key={index} className={`editor-organizer-card ${selectedOrganizerPages.includes(index) ? 'selected' : ''}`} draggable onDragStart={event => event.dataTransfer.setData('application/pdfking-page', String(index))} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const from = Number(event.dataTransfer.getData('application/pdfking-page')); if (!Number.isInteger(from) || from === index) return; const order = Array.from({ length: pageCount }, (_, pageIndex) => pageIndex); order.splice(index, 0, order.splice(from, 1)[0]); void commitCurrent([{ type: 'pages', action: 'reorder', order }]).catch(cause => setError(cause.message)) }} onClick={event => selectOrganizerPage(index, event)} onDoubleClick={() => { setViewerPage(index + 1); setToolId('pdf-editor'); setTextEditMode(false); selectEditorMenuTab('home') }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setViewerPage(index + 1); setToolId('pdf-editor'); setTextEditMode(false); selectEditorMenuTab('home') } else if (event.key === ' ') { event.preventDefault(); selectOrganizerPage(index, event) } }} role="button" tabIndex={0} aria-pressed={selectedOrganizerPages.includes(index)} aria-label={`Page ${index + 1}; double click to open in editor`}>
+              <div className="editor-organizer-card-heading"><span>{String(index + 1).padStart(2, '0')}</span>{selectedOrganizerPages.includes(index) ? <span className="editor-organizer-selected-mark"><Icon name="check" size={13} /></span> : <span className="editor-organizer-drag-handle" aria-hidden="true" />}</div>
+              <div className="editor-organizer-paper-frame"><PageThumbnail file={file} pageNumber={index + 1} pageSize={pageSizes[index]} root={organizerRoot} targetWidth={520} /></div>
               <span className="editor-organizer-page-label">Page {index + 1}</span>
             </div>)}
           </div>
         </div>}
-        <PdfViewer redactionMarks={redaction} onRedactionAdd={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:[...currentEditSnapshot.current.redaction,{...mark,key:crypto.randomUUID(),page:mark.page,viewerRotation:Number(viewerState.rotation)||0}]})} onRedactionChange={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.map(m=>m.key===mark.key?mark:m)})} onRedactionDelete={key=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.filter(m=>m.key!==key)})} selectedAnnotation={selectedAnnotation} onAnnotationSelect={setSelectedAnnotation} onAnnotationChange={updateAnnotation} annotationMode={toolId} annotations={[...annotations,...formCandidates.map(candidate=>({...candidate,type:'candidate',color:'#2381dd',opacity:.8}))]} annotationStyle={annotationStyle} onAnnotationAdd={items=>{if(sessionRef.current.id!==session.id||filesRef.current[0]!==file)return;const added=items.map(item=>({...item,key:item.key||crypto.randomUUID()}));commitEditSnapshot({...currentEditSnapshot.current,annotations:[...currentEditSnapshot.current.annotations,...added]});setSelectedAnnotation(added.at(-1))}} file={file} page={viewerPage} pageCount={pageCount} pageSizes={pageSizes} viewerState={viewerState} onViewerStateChange={setViewerState} onPageChange={navPage} formValues={options.fields || {}} onFormValueChange={(name, value) => setOption('fields', { ...(options.fields || {}), [name]: value })} editTextMode={textEditMode} addTextMode={toolId === 'add-text'} imageSelectMode={toolId === 'images'} textStyle={textStyle} onTextStyleActivate={setTextStyle} localFonts={localFonts} onSelectTextFont={selectTextFont} onAddTextPlaced={() => { setToolId('add-text'); setTextEditMode(false) }} onTextObjectSelected={selectTextObject} imageEdits={imageEdits} selectedImage={selectedImage} onSelectImage={selectImageObject} onImageOpen={openImageInspector} onImageEdit={edit=>saveImageEdit({...edit,viewerRotation:Number(viewerState.rotation)||0})} onImageDelete={deleteSelectedImage} onImageDuplicate={duplicateSelectedImage} onPlaceImage={(image,position)=>void placeImageFile(image,position)} textEdits={textEdits} onTextEdit={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: [...textEdits.filter((item) => !(item.page === edit.page && item.key === edit.key)), { ...edit, viewerRotation: Number(viewerState.rotation)||0 }] })} onTextDelete={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: textEdits.filter((item) => item.page !== edit.page || item.key !== edit.key) })} />
+        <PdfViewer redactionMarks={redaction} onRedactionAdd={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:[...currentEditSnapshot.current.redaction,{...mark,key:crypto.randomUUID(),page:mark.page,viewerRotation:Number(viewerState.rotation)||0}]})} onRedactionChange={mark=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.map(m=>m.key===mark.key?mark:m)})} onRedactionDelete={key=>commitEditSnapshot({...currentEditSnapshot.current,redaction:currentEditSnapshot.current.redaction.filter(m=>m.key!==key)})} onObjectOpen={(mode, item) => { selectEditorMenuTab('home'); activateEditorTool(mode); if (item) setSelectedAnnotation(item) }} selectedAnnotation={selectedAnnotation} onAnnotationSelect={setSelectedAnnotation} onAnnotationChange={updateAnnotation} annotationMode={toolId} annotations={[...annotations,...formCandidates.map(candidate=>({...candidate,type:'candidate',color:'#2381dd',opacity:.8}))]} annotationStyle={annotationStyle} onAnnotationAdd={items=>{if(sessionRef.current.id!==session.id||filesRef.current[0]!==file)return;const added=items.map(item=>({...item,key:item.key||crypto.randomUUID()}));commitEditSnapshot({...currentEditSnapshot.current,annotations:[...currentEditSnapshot.current.annotations,...added]});setSelectedAnnotation(added.at(-1))}} file={file} page={viewerPage} pageCount={pageCount} pageSizes={pageSizes} viewerState={viewerState} onViewerStateChange={setViewerState} onPageChange={navPage} formValues={options.fields || {}} onFormValueChange={(name, value) => setOption('fields', { ...(options.fields || {}), [name]: value })} editTextMode={textEditMode} addTextMode={toolId === 'add-text'} imageSelectMode={toolId === 'images'} textStyle={textStyle} onTextStyleActivate={setTextStyle} localFonts={localFonts} onSelectTextFont={selectTextFont} onAddTextPlaced={() => { setToolId('add-text'); setTextEditMode(false) }} onTextObjectSelected={selectTextObject} imageEdits={imageEdits} selectedImage={selectedImage} onSelectImage={selectImageObject} onImageOpen={openImageInspector} onImageEdit={edit=>saveImageEdit({...edit,viewerRotation:Number(viewerState.rotation)||0})} onImageDelete={deleteSelectedImage} onImageDuplicate={duplicateSelectedImage} onPlaceImage={(image,position)=>void placeImageFile(image,position)} textEdits={textEdits} onTextEdit={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: [...textEdits.filter((item) => !(item.page === edit.page && item.key === edit.key)), { ...edit, viewerRotation: Number(viewerState.rotation)||0 }] })} onTextDelete={(edit) => commitEditSnapshot({ ...currentEditSnapshot.current, textEdits: textEdits.filter((item) => item.page !== edit.page || item.key !== edit.key) })} />
       </>}
 
     </section>
@@ -1563,13 +1706,27 @@ function moveFile(files, index, offset) {
 
 function ToolOptions({ toolId, options, setOption, pageCount, formFields = [], editorPage = null }) {
   const field = (label, key, placeholder = '') => <label className="tool-field">{label}<input className="studio-input" value={options[key]} onChange={(event) => setOption(key, event.target.value)} placeholder={placeholder} /></label>
-  const select = (label, key, choices) => <label className="tool-field">{label}<select className="studio-input" value={options[key]} onChange={(event) => setOption(key, event.target.value)}>{choices.map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>
+  const select = (label, key, choices) => <label className="tool-field">{label}<ThemedSelect className="studio-input" value={options[key]} onChange={(event) => setOption(key, event.target.value)} options={choices.map(([value, text]) => ({ value, label: text }))} /></label>
   const note = (text) => <p className="option-note">{text}</p>
+  const mergeMode = ['interlaced', 'custom'].includes(options.mergeMode) ? options.mergeMode : 'sequential'
   switch (toolId) {
     case 'pdf-editor': return null
-    case 'merge-pdf': return <>{note('Files are combined in the order listed. Use Add another PDF to include more.')}</>
+    case 'merge-pdf': return <section className="merge-mode-picker" aria-label="Merge options">
+      <div className="merge-mode-heading"><strong>Merge order</strong><span>Choose how pages are combined. Reorder PDFs in the list above for a custom sequence.</span></div>
+      <div className="merge-mode-options" role="group" aria-label="Merge options">
+        {[
+          ['sequential', 'One after another', 'Finish each PDF before starting the next.'],
+          ['interlaced', 'Interlace pages', 'Alternate pages between PDFs.'],
+          ['custom', 'Custom order', 'Arrange all pages from every PDF.'],
+        ].map(([value, label, description]) => <button key={value} type="button" className={`merge-mode-option ${value === 'custom' ? 'is-custom-order' : ''} ${mergeMode === value ? 'is-active' : ''}`} aria-pressed={mergeMode === value} onClick={() => setOption('mergeMode', value)}>
+          {value !== 'custom' && <span className={`merge-mode-visual merge-mode-visual-${value}`} aria-hidden="true">{(value === 'sequential' ? ['A', 'A', 'B', 'B'] : ['A', 'B', 'A', 'B']).map((label, index) => <i key={index}>{label}</i>)}</span>}
+          <span className="merge-mode-copy"><strong>{label}</strong><small>{description}</small></span>
+          <span className="merge-mode-check" aria-hidden="true">✓</span>
+        </button>)}
+      </div>
+    </section>
     case 'split-pdf': return <>{select('Split mode', 'splitMode', [['ranges', 'By page ranges'], ['each', 'Every page separately']])}{options.splitMode === 'ranges' && field(`Page ranges${pageCount ? ` · 1–${pageCount}` : ''}`, 'ranges', '1-3, 5')}{note(options.splitMode === 'each' ? 'Creates one PDF for every page.' : 'Use commas for separate groups and hyphens for ranges.')}</>
-    case 'extract-pages': return <>{field(`Pages to extract${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', 'Select thumbnails or enter 1-3, 5')}{note('The chosen pages are combined into one new PDF.')}</>
+    case 'extract-pages': return <>{select('Extraction mode', 'extractMode', [['selected', 'Selected pages in one PDF'], ['each', 'Every page separately']])}{options.extractMode !== 'each' && field(`Pages to extract${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', 'Select thumbnails or enter 1-3, 5')}{note(options.extractMode === 'each' ? 'Creates a separate PDF for every page.' : 'The chosen pages are combined into one new PDF.')}</>
     case 'delete-pages': return <>{field(`Pages to remove${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', 'Select thumbnails or enter 2, 4-6')}{note('At least one page must remain in the document.')}</>
     case 'duplicate-pages': return <>{field('Pages to duplicate', 'pages', 'Select thumbnails or enter 1, 3')}{note('Copies are appended to the end of the document.')}</>
     case 'organize-pdf': return <>{field(`Custom page order${pageCount ? ` · 1–${pageCount}` : ''}`, 'pages', '3, 1-2, 4')}{note('Use the page arrows to reorder. Repeat a number to duplicate a page, or omit it to remove it.')}</>
@@ -1596,7 +1753,7 @@ function ToolOptions({ toolId, options, setOption, pageCount, formFields = [], e
       const value = options.fields?.[field.name] ?? field.value ?? ''
       const update = (next) => setOption('fields', { ...(options.fields || {}), [field.name]: next })
       if (field.type.includes('CheckBox')) return <label className="option-check-row" key={field.name}><input type="checkbox" checked={Boolean(value)} onChange={(event) => update(event.target.checked)} /><span>{field.name}</span></label>
-      if (field.choices?.length) return <label className="tool-field" key={field.name}>{field.name}<select className="studio-input" value={value} onChange={(event) => update(event.target.value)}>{field.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}</select></label>
+      if (field.choices?.length) return <label className="tool-field" key={field.name}>{field.name}<ThemedSelect className="studio-input" value={value} onChange={(event) => update(event.target.value)} options={field.choices.map((choice) => ({ value: choice, label: choice }))} /></label>
       return <label className="tool-field" key={field.name}>{field.name}<input className="studio-input" value={value} onChange={(event) => update(event.target.value)} /></label>
     })}</> : note('Select a PDF with interactive form fields. This PDF has no editable AcroForm fields, or its form could not be read.')
     case 'sign-pdf': return <>{field('Typed signature', 'signature', 'Your full name')}{field('Page number', 'signaturePage', '1')}{note('Adds a visible typed signature. It is not a certificate-based digital signature.')}</>
@@ -1648,7 +1805,7 @@ function RedactionPreview({ file, page, redaction, onMark }) {
   return <div className="redaction-preview-panel"><strong>Mark redaction on page {page}</strong><div className="redaction-canvas-wrap" style={{width:560,maxWidth:'100%'}}><canvas ref={canvas} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} />{visibleMarks.map((mark, index) => { const visible = { redactX: mark.redactX ?? mark.x, redactY: mark.redactY ?? mark.y, redactWidth: mark.redactWidth ?? mark.width, redactHeight: mark.redactHeight ?? mark.height }; return visible.redactWidth > 0 && visible.redactHeight > 0 ? <div key={index} className="redaction-mask-preview" style={{ left: `${visible.redactX * 100}%`, top: `${visible.redactY * 100}%`, width: `${visible.redactWidth * 100}%`, height: `${visible.redactHeight * 100}%` }} /> : null })}</div>{error && <p className="form-error">{error}</p>}<small>Drag a rectangle over the confidential content.</small></div>
 }
 
-function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, page, pageCount, pageSizes = [], viewerState = {}, onViewerStateChange = () => {}, onPageChange, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, onTextObjectSelected = () => {}, imageEdits = [], selectedImage, onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {} }) {
+function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange,onObjectOpen, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, page, pageCount, pageSizes = [], viewerState = {}, onViewerStateChange = () => {}, onPageChange, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, onTextObjectSelected = () => {}, imageEdits = [], selectedImage, onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {} }) {
   const pageContainer = useRef(null)
   const pageNodes = useRef([])
   const pendingZoomAnchor = useRef(null)
@@ -1662,7 +1819,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const [rotation, setRotation] = useState(() => ((Number(viewerState.rotation) || 0) % 360 + 360) % 360)
   const [darkPage, setDarkPage] = useState(() => Boolean(viewerState.darkPage))
   const [sidebarTab, setSidebarTab] = useState(() => ['pages', 'outline', 'search'].includes(viewerState.sidebarTab) ? viewerState.sidebarTab : 'pages')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(viewerState.sidebarCollapsed) || (typeof window !== 'undefined' && window.matchMedia('(max-width: 560px)').matches))
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(viewerState.sidebarCollapsed) || (typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches))
   const [searchQuery, setSearchQuery] = useState(() => viewerState.searchQuery || '')
   const [searchOptions, setSearchOptions] = useState(() => viewerState.searchOptions || { caseSensitive: false, wholeWord: false, regex: false })
   const [searchResults, setSearchResults] = useState([])
@@ -1673,7 +1830,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const [history, setHistory] = useState(() => viewerState.history || { entries: [Number(page) || 1], index: 0 })
   const [isInteracting, setIsInteracting] = useState(false)
   const [pageBox, setPageBox] = useState({ width: 900, height: 700 })
-  const [windowRange, setWindowRange] = useState({ start: 0, end: 5 })
+  const [windowRange, setWindowRange] = useState({ start: 0, end: 2 })
   const [pageSizeCache, setPageSizeCache] = useState(() => new Map(pageSizes.filter(Boolean).map((size) => [size.pageNumber, size])))
   const [selectedTextBox, setSelectedTextBox] = useState(null)
   const [presentationMode, setPresentationMode] = useState(false)
@@ -1684,6 +1841,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   const interactionTimer = useRef(0)
   const navigationTimer = useRef(0)
   const pendingNavigationPage = useRef(null)
+  useEffect(() => () => window.clearTimeout(navigationTimer.current), [])
   const initialPositionRestored = useRef(false)
   const previousViewMode = useRef(viewMode)
   const previousPageTops = useRef(new Map())
@@ -1776,7 +1934,6 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
     })
   }, [pages, viewMode, page])
   const totalHeight = entries.length ? entries[entries.length - 1].top + entries[entries.length - 1].height + 32 : 0
-  const maxWidth = Math.max(pageBox.width, ...entries.map((entry) => entry.width), 0)
   const startEntry = windowRange.start
   const endEntry = Math.min(entries.length, windowRange.end)
   const mountedEntries = entries.slice(startEntry, endEntry)
@@ -1800,8 +1957,8 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
 
   const updateVirtualRange = () => {
     const container = pageContainer.current
-    if (!container || !entries.length) { setWindowRange({ start: 0, end: Math.min(5, entries.length) }); return }
-    const buffer = Math.max(700, container.clientHeight * 1.35)
+    if (!container || !entries.length || !container.clientHeight) { setWindowRange((current) => current.start === 0 && current.end === Math.min(2, entries.length) ? current : { start: 0, end: Math.min(2, entries.length) }); return }
+    const buffer = Math.min(240, container.clientHeight * 0.3)
     const from = Math.max(0, container.scrollTop - buffer)
     const to = container.scrollTop + container.clientHeight + buffer
     let start = 0
@@ -1842,16 +1999,9 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
         onViewerStateChangeRef.current?.({ page: lastPageProp.current, scrollTop: container.scrollTop, zoom, viewMode, fitMode, rotation, darkPage, sidebarTab, sidebarCollapsed, searchQuery, searchOptions, history })
       }, 240)
     }
-    const finishNavigation = () => {
-      if (!pendingNavigationPage.current) return
-      window.clearTimeout(navigationTimer.current)
-      lastPageProp.current = pendingNavigationPage.current
-      pendingNavigationPage.current = null
-    }
     container.addEventListener('scroll', handleScroll, { passive: true })
-    container.addEventListener('scrollend', finishNavigation)
-    return () => { container.removeEventListener('scroll', handleScroll); container.removeEventListener('scrollend', finishNavigation); cancelAnimationFrame(frame); window.clearTimeout(scrollTimer.current); window.clearTimeout(interactionTimer.current); window.clearTimeout(navigationTimer.current) }
-  }, [entries, zoom, viewMode, fitMode, rotation, darkPage, sidebarTab, sidebarCollapsed, searchQuery, searchOptions, history])
+    return () => { container.removeEventListener('scroll', handleScroll); cancelAnimationFrame(frame); window.clearTimeout(scrollTimer.current); window.clearTimeout(interactionTimer.current) }
+  }, [entries, pageBox.height, zoom, viewMode, fitMode, rotation, darkPage, sidebarTab, sidebarCollapsed, searchQuery, searchOptions, history])
 
   useEffect(() => {
     if (!entries.length) return
@@ -1919,7 +2069,10 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
 
   useEffect(() => {
     const container = pageContainer.current
-    const currentEntry = entries.find((entry) => entry.pages.some((item) => item.pageNumber === page))
+    // Continuous scrolling must not change zoom when the visible page changes shape.
+    const currentEntry = viewMode === 'single'
+      ? entries.find((entry) => entry.pages.some((item) => item.pageNumber === page))
+      : entries[0]
     if (!fitMode || !container || !currentEntry?.width || !currentEntry?.height) return
     const style = getComputedStyle(container)
     const horizontalPadding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
@@ -1931,7 +2084,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
     const fitZoom = fitMode === 'fit-width' ? availableWidth / widthAt100 : Math.min(availableWidth / widthAt100, availableHeight / heightAt100)
     const fitted = Math.max(0.1, Math.min(2.5, fitZoom))
     setZoom((current) => Math.abs(current - fitted) < 0.002 ? current : fitted)
-  }, [fitMode, pageBox.width, pageBox.height, entries, page, zoom])
+  }, [fitMode, pageBox.width, pageBox.height, entries, page, zoom, viewMode])
 
   useEffect(() => {
     if (sidebarTab !== 'outline' || !file || outline.length) return
@@ -2046,6 +2199,10 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
     changePage(target, false)
   }
   const onWheel = (event) => {
+    if (!(event.ctrlKey || event.metaKey)) {
+      window.clearTimeout(navigationTimer.current)
+      pendingNavigationPage.current = null
+    }
     if (!(event.ctrlKey || event.metaKey)) return
     event.preventDefault()
     setZoomAround(zoom * Math.exp(-event.deltaY * 0.003), event.clientX, event.clientY)
@@ -2105,20 +2262,10 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
   useEffect(() => {
     const handleKeys = (event) => {
       const target = event.target
-      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); document.querySelector('.pdf-editor-menu-search input')?.focus() }
-        return
-      }
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) return
       if (event.isComposing || !(target instanceof HTMLElement && target.closest('.pdf-editor-workspace'))) return
-      const modifier = event.metaKey || event.ctrlKey
-      if (modifier && (event.key === '+' || event.key === '=' || event.key === 'Add')) { event.preventDefault(); setZoomAround(zoom * 1.2) }
-      else if (modifier && (event.key === '-' || event.key === 'Subtract')) { event.preventDefault(); setZoomAround(zoom / 1.2) }
-      else if (modifier && event.key === '0') { event.preventDefault(); setFitMode(''); setZoom(1) }
-      else if (modifier && event.key.toLowerCase() === 'f') { event.preventDefault(); document.querySelector('.pdf-editor-menu-search input')?.focus() }
-      else if (event.key === 'PageDown' || (presentationMode && event.key === 'ArrowRight')) { event.preventDefault(); changePage(page + 1) }
-      else if (event.key === 'PageUp' || (presentationMode && event.key === 'ArrowLeft')) { event.preventDefault(); changePage(page - 1) }
-      else if (event.key === 'Home') { event.preventDefault(); changePage(1) }
-      else if (event.key === 'End') { event.preventDefault(); changePage(pageCount) }
+      if (presentationMode && event.key === 'ArrowRight') { event.preventDefault(); changePage(page + 1) }
+      else if (presentationMode && event.key === 'ArrowLeft') { event.preventDefault(); changePage(page - 1) }
       else if (event.key === 'Escape' && presentationMode) { event.preventDefault(); void toggleFullscreen(true) }
     }
     window.addEventListener('keydown', handleKeys)
@@ -2163,14 +2310,14 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
         {!sidebarCollapsed && sidebarTab === 'pages' && <div className="pdf-viewer-sidebar-footer"><span>Current page</span><strong>{page} <i>/</i> {pageCount}</strong></div>}
       </aside>}
       <div className={`pdf-viewer-page ${viewMode === 'single' ? 'is-single-page' : ''} ${viewMode === 'book' ? 'is-book-view' : ''} ${presentationMode ? 'is-presentation-page' : ''}`} ref={pageContainer} tabIndex={0} aria-label={`PDF pages, ${ariaMode} mode`}>
-        <div className="pdf-viewer-virtual-space" style={{ height: totalHeight, minWidth: maxWidth }}>
-          {mountedEntries.map((entry) => <div className="pdf-viewer-virtual-slot" data-page={entry.page} key={`${pageKey}-${entry.page}`} style={{ top: entry.top, height: entry.height, minWidth: maxWidth }}>
+        <div className="pdf-viewer-virtual-space" style={{ height: totalHeight }}>
+          {mountedEntries.map((entry) => <div className="pdf-viewer-virtual-slot" data-page={entry.page} key={`${pageKey}-${entry.page}`} style={{ top: entry.top, height: entry.height, minWidth: entry.width }}>
             <div className="pdf-viewer-virtual-spread" style={{ width: entry.width, height: entry.height }}>
               {entry.pages.map((item, sideIndex) => {
                 const pageResults = searchHighlights.get(item.pageNumber) || []
                 const actualVisible = entry.top + entry.height >= lastScrollTop.current && entry.top <= lastScrollTop.current + pageBox.height
                 const priority = actualVisible ? (item.pageNumber === page ? 0 : 1) : item.pageNumber > page ? 2 : 3
-                return <PdfViewerPage selectedAnnotation={selectedAnnotation} onAnnotationSelect={onAnnotationSelect} onAnnotationChange={onAnnotationChange} redactionMarks={redactionMarks.filter(m=>m.page===item.pageNumber)} onRedactionAdd={mark=>onRedactionAdd?.({...mark,page:item.pageNumber})} onRedactionChange={onRedactionChange} onRedactionDelete={onRedactionDelete} annotationMode={annotationMode} annotations={annotations.filter(a=>a.page===item.pageNumber)} annotationStyle={annotationStyle} onAnnotationAdd={onAnnotationAdd} key={`${pageKey}-${item.pageNumber}`} file={file} pageNumber={item.pageNumber} pageSize={item.size} displayWidth={item.width} displayHeight={item.height} pageNodes={pageNodes} root={pageContainer} zoom={zoom} rotation={rotation} renderQuality={isInteracting ? 'preview' : 'full'} renderPriority={priority} formValues={formValues} onFormValueChange={onFormValueChange} editTextMode={editTextMode} addTextMode={addTextMode} imageSelectMode={imageSelectMode} selectedImage={selectedImage} imageEdits={imageEdits.filter((edit) => edit.page === item.pageNumber)} onSelectImage={onSelectImage} onImageOpen={onImageOpen} onImageEdit={onImageEdit} onImageDelete={onImageDelete} onImageDuplicate={onImageDuplicate} onPlaceImage={onPlaceImage} onTextObjectSelected={onTextObjectSelected} textStyle={textStyle} onTextStyleActivate={onTextStyleActivate} localFonts={localFonts} onSelectTextFont={onSelectTextFont} onAddTextPlaced={onAddTextPlaced} textEdits={textEdits.filter((edit) => edit.page === item.pageNumber)} onTextEdit={onTextEdit} onTextDelete={onTextDelete} selectedTextBox={selectedTextBox} onSelectTextBox={setSelectedTextBox} searchRects={pageResults} onNavigateInternal={changePage} />
+                return <PdfViewerPage onObjectOpen={onObjectOpen} selectedAnnotation={selectedAnnotation} onAnnotationSelect={onAnnotationSelect} onAnnotationChange={onAnnotationChange} redactionMarks={redactionMarks.filter(m=>m.page===item.pageNumber)} onRedactionAdd={mark=>onRedactionAdd?.({...mark,page:item.pageNumber})} onRedactionChange={onRedactionChange} onRedactionDelete={onRedactionDelete} annotationMode={annotationMode} annotations={annotations.filter(a=>a.page===item.pageNumber)} annotationStyle={annotationStyle} onAnnotationAdd={onAnnotationAdd} key={`${pageKey}-${item.pageNumber}`} file={file} pageNumber={item.pageNumber} pageSize={item.size} displayWidth={item.width} displayHeight={item.height} pageNodes={pageNodes} root={pageContainer} zoom={zoom} rotation={rotation} renderQuality={isInteracting ? 'preview' : 'full'} renderPriority={priority} formValues={formValues} onFormValueChange={onFormValueChange} editTextMode={editTextMode} addTextMode={addTextMode} imageSelectMode={imageSelectMode} selectedImage={selectedImage} imageEdits={imageEdits.filter((edit) => edit.page === item.pageNumber)} onSelectImage={onSelectImage} onImageOpen={onImageOpen} onImageEdit={onImageEdit} onImageDelete={onImageDelete} onImageDuplicate={onImageDuplicate} onPlaceImage={onPlaceImage} onTextObjectSelected={onTextObjectSelected} textStyle={textStyle} onTextStyleActivate={onTextStyleActivate} localFonts={localFonts} onSelectTextFont={onSelectTextFont} onAddTextPlaced={onAddTextPlaced} textEdits={textEdits.filter((edit) => edit.page === item.pageNumber)} onTextEdit={onTextEdit} onTextDelete={onTextDelete} selectedTextBox={selectedTextBox} onSelectTextBox={setSelectedTextBox} searchRects={pageResults} onNavigateInternal={changePage} />
               })}
             </div>
           </div>)}
@@ -2190,7 +2337,7 @@ function PdfViewer({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, r
         <button type="button" aria-label="Zoom in" title="Zoom in" disabled={zoom >= 2.5} onClick={() => setZoomAround(zoom * 1.2)}><Icon name="plus" size={15} /></button>
         <output className="pdf-dock-zoom-value">{Math.round(zoom * 50)}%</output>
       </div>
-      <select className="pdf-dock-view-mode" aria-label="Page display mode" value={viewMode} onChange={event => { const mode = event.target.value; setViewMode(mode); if (mode === 'book') setFitMode('fit-page'); updateInteraction() }}><option value="continuous">Continuous</option><option value="single">Single page</option><option value="book">Book view</option></select>
+      <ThemedSelect className="pdf-dock-view-mode" ariaLabel="Page display mode" value={viewMode} onChange={event => { const mode = event.target.value; setViewMode(mode); if (mode === 'book') setFitMode('fit-page'); updateInteraction() }} options={[{ value: 'continuous', label: 'Continuous' }, { value: 'single', label: 'Single page' }, { value: 'book', label: 'Book view' }]} />
       <button type="button" className={`pdf-dock-utility ${darkPage ? 'active' : ''}`} title="Toggle dark page appearance" aria-label="Toggle dark page appearance" aria-pressed={darkPage} onClick={() => setDarkPage(value => !value)}><Icon name={darkPage ? 'sun' : 'moon'} size={15} /></button>
       <button type="button" className="pdf-dock-utility" title="Full screen reading" aria-label="Full screen reading" onClick={() => void toggleFullscreen()}><Icon name="expand" size={15} /></button>
     </nav>}
@@ -2215,6 +2362,7 @@ function PdfNativeFormLayer({ fields, pageNumber, pageSize, pageHeight, values =
       if (field.type === 'Ch' && field.choices.length) {
         const multiple = field.multiSelect
         const selected = multiple ? (Array.isArray(value) ? value.map(String) : value == null || value === '' ? [] : [String(value)]) : String(Array.isArray(value) ? value[0] ?? '' : value ?? '')
+        if (!multiple && field.combo) return <ThemedSelect key={field.key} className="pdf-form-widget" style={style} value={selected} ariaLabel={fieldLabel} disabled={field.readOnly} onChange={(event) => onChange(field.name, event.target.value)} options={field.choices.map((choice) => ({ value: choice.value, label: choice.label }))} />
         return <select {...common} key={field.key} className="pdf-form-widget" style={style} value={selected} multiple={multiple} size={!field.combo ? Math.max(2, Math.min(4, field.choices.length)) : undefined} onChange={(event) => onChange(field.name, multiple ? Array.from(event.target.selectedOptions, (option) => option.value) : event.target.value)}>{field.choices.map((choice) => <option key={`${field.name}-${choice.value}`} value={choice.value}>{choice.label}</option>)}</select>
       }
       if (field.type === 'Tx') {
@@ -3054,7 +3202,7 @@ function renderStyledText(text, ranges, displayHeight, pageHeight, defaults) {
   })
 }
 
-function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChange, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, pageNumber, pageSize, displayWidth, displayHeight, pageNodes, root, zoom = 1, rotation = 0, renderQuality = 'full', renderPriority = 2, searchRects = [], onNavigateInternal = () => {}, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, selectedImage, imageEdits = [], onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, onTextObjectSelected = () => {}, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {}, selectedTextBox, onSelectTextBox = () => {} }) {
+function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChange,onObjectOpen, redactionMarks=[],onRedactionAdd,onRedactionChange,onRedactionDelete, annotationMode,annotations=[],annotationStyle,onAnnotationAdd, file, pageNumber, pageSize, displayWidth, displayHeight, pageNodes, root, zoom = 1, rotation = 0, renderQuality = 'full', renderPriority = 2, searchRects = [], onNavigateInternal = () => {}, formValues = {}, onFormValueChange = () => {}, editTextMode = false, addTextMode = false, imageSelectMode = false, selectedImage, imageEdits = [], onSelectImage = () => {}, onImageOpen = () => {}, onImageEdit = () => {}, onImageDelete = () => {}, onImageDuplicate = () => {}, onPlaceImage = () => {}, onTextObjectSelected = () => {}, textStyle, onTextStyleActivate, localFonts = [], onSelectTextFont, onAddTextPlaced = () => {}, textEdits = [], onTextEdit = () => {}, onTextDelete = () => {}, selectedTextBox, onSelectTextBox = () => {} }) {
   const wrapper = useRef(null)
   const canvas = useRef(null)
     const textLayer = useRef(null)
@@ -3439,7 +3587,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
           setRendered(true)
           const results = await Promise.allSettled([
             engine.renderPdfTextLayer(file, pageNumber, targetText, scale, { rotation, signal: job.signal }),
-            imageSelectMode ? engine.inspectPdfPageImages(file, pageNumber, rotation) : Promise.resolve([]),
+            imageSelectMode || annotationMode === 'pdf-editor' ? engine.inspectPdfPageImages(file, pageNumber, rotation) : Promise.resolve([]),
             engine.inspectPdfPageLinks(file, pageNumber, rotation),
             engine.inspectPdfPageFormFields(file, pageNumber, rotation),
           ])
@@ -3469,7 +3617,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
       // Synchronous, instance-owned release before the next effect starts.
       targetText.replaceChildren()
     }
-  }, [file, pageNumber, pageSize?.width, renderQuality, renderPriority, rotation, imageSelectMode, renderRetry])
+  }, [file, pageNumber, pageSize?.width, renderQuality, renderPriority, rotation, imageSelectMode, annotationMode, renderRetry])
 
   const nativeDesignFields=formFields.filter(f=>f.type!=='Sig').map(f=>({
     ...f,key:`field-${f.key}`,type:'form-update',originalName:f.name,widgetId:f.key,page:pageNumber,viewerRotation:rotation,
@@ -3495,7 +3643,22 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     onPlaceImage?.(dropped, { page: pageNumber, x, y })
   }
 
-  return <div className="acrobat-document-page" style={{ aspectRatio, width: `${displayWidth || pageSize?.width * zoom * (96 / 72) || 816}px`, height: `${displayHeight || pageSize?.height * zoom * (96 / 72) || 1056}px` }} ref={(node) => { wrapper.current = node; pageNodes.current[pageNumber - 1] = node }} onPointerDown={handlePagePointerDown} onDragOver={(event) => { if ([...(event.dataTransfer?.types || [])].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={handleImageDrop}>
+  return <div className="acrobat-document-page" data-page-number={pageNumber} style={{ aspectRatio, width: `${displayWidth || pageSize?.width * zoom * (96 / 72) || 816}px`, height: `${displayHeight || pageSize?.height * zoom * (96 / 72) || 1056}px` }} ref={(node) => { wrapper.current = node; pageNodes.current[pageNumber - 1] = node }} onDoubleClickCapture={event => {
+      if (annotationMode !== 'pdf-editor') return
+      if (event.target.closest('.pdf-form-widget, .pdf-form-signature-placeholder')) {
+        onObjectOpen?.('fill-forms')
+        return
+      }
+      const bounds = wrapper.current.getBoundingClientRect()
+      const x = (event.clientX - bounds.left) / bounds.width
+      const y = (event.clientY - bounds.top) / bounds.height
+      const item = [...annotations].reverse().find(item => !item.deleted && item.type === 'annotation' && x >= item.x && x <= item.x + item.width && y >= item.y && y <= item.y + item.height)
+      if (item) {
+        event.preventDefault()
+        event.stopPropagation()
+        onObjectOpen?.('annotation-select', item)
+      }
+    }} onPointerDown={handlePagePointerDown} onDragOver={(event) => { if ([...(event.dataTransfer?.types || [])].includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }} onDrop={handleImageDrop}>
     {snapGuides.map((guide, index) => <span key={`${guide.axis}-${index}`} className={`pdf-text-snap-guide ${guide.axis}`} style={guide.axis === 'vertical' ? { left: `${guide.position * 100}%` } : { top: `${guide.position * 100}%` }} aria-hidden="true" />)}
     {!rendered && !canvas.current?.dataset.painted && <div className="acrobat-page-placeholder" aria-hidden="true" />}
     <canvas ref={canvas} className={rendered ? 'is-rendered' : canvas.current?.dataset.painted ? 'is-stale' : 'is-pending'} aria-label={`PDF page ${pageNumber}`} />
@@ -3516,10 +3679,10 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     })}</div>
     <div className="pdf-image-object-layer">{imageEdits.filter(edit=>(edit.isNew||!imageSelectMode)&&!edit.deleted).map(edit=><PdfImageObject key={edit.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} pageSize={pageSize} region={edit} imageEdit={edit} selected={selectedImage?.page === pageNumber && selectedImage?.key === edit.key} selectedImage={selectedImage} onSelect={onSelectImage} onOpen={onImageOpen} onChange={onImageEdit} onDelete={onImageDelete} onDuplicate={onImageDuplicate} pageWidth={displayWidth || pageWidth} pageHeight={displayHeight || pageHeight} candidate={imageSelectMode} />)}</div>
     {searchRects.length > 0 && <div className="pdf-search-highlight-layer" aria-hidden="true">{searchRects.map((rect) => <span key={rect.id} className={rect.active ? 'is-active' : ''} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} />)}</div>}
-    <div ref={textLayer} className={`pdf-text-layer is-text-editing ${addTextMode ? 'is-adding-text' : ''}`} aria-label={`Selectable text on page ${pageNumber}`} onPointerDown={handleTextLayerPointerDown} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} onClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; const span = event.target.closest('.pdf-text-layer span'); lastClickedTextSpan.current = span || null; if (!span) { if (addTextMode) beginTextEdit(event, true); return } const group = collectEditableTextGroups(textLayer.current, pageSize).find((candidate) => candidate.spans.includes(span)); if (group?.key !== selectedText?.key) beginTextEdit(event, false, span) }} onDoubleClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; window.clearTimeout(pendingTextSelection.current); beginTextEdit(event, true, event.target.closest('.pdf-text-layer span') || lastClickedTextSpan.current) }} />
+    <div ref={textLayer} className={`pdf-text-layer is-text-editing ${annotationMode === 'pdf-editor' ? 'is-object-select-mode' : ''} ${addTextMode ? 'is-adding-text' : ''}`} aria-label={`Selectable text on page ${pageNumber}`} onPointerDown={handleTextLayerPointerDown} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} onClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; const span = event.target.closest('.pdf-text-layer span'); lastClickedTextSpan.current = span || null; if (!span) { if (addTextMode) beginTextEdit(event, true); return } const group = collectEditableTextGroups(textLayer.current, pageSize).find((candidate) => candidate.spans.includes(span)); if (group?.key !== selectedText?.key) beginTextEdit(event, false, span) }} onDoubleClick={(event) => { if(['highlight','underline','strike'].includes(annotationMode))return; window.clearTimeout(pendingTextSelection.current); beginTextEdit(event, true, event.target.closest('.pdf-text-layer span') || lastClickedTextSpan.current) }} />
     {linkRegions.length > 0 && <div className="pdf-link-layer" aria-label={`Links on page ${pageNumber}`}>{linkRegions.map((link, index) => <a key={`${link.x}-${link.y}-${index}`} href={link.url || '#'} title={link.title} aria-label={link.title} style={{ left: `${link.x * 100}%`, top: `${link.y * 100}%`, width: `${link.width * 100}%`, height: `${link.height * 100}%` }} onClick={(event) => { event.stopPropagation(); if (link.destinationPage) onNavigateInternal(link.destinationPage); else if (link.url && event.metaKey) {/* Cmd+click - let browser open in new tab naturally */} else if (link.url) { event.preventDefault(); window.pdfKing?.openExternal?.(link.url).catch?.(() => {}) } } } />)}</div>}
     {annotationMode!=='form-design' && formFields.length > 0 && <PdfNativeFormLayer fields={formFields} pageNumber={pageNumber} pageSize={pageSize} pageHeight={pageHeight} values={formValues} onChange={onFormValueChange} />}
-    {imageSelectMode && imageRegions.length > 0 && <div className="pdf-image-object-layer" aria-label={`Images on page ${pageNumber}`}>
+    {imageRegions.length > 0 && <div className={`pdf-image-object-layer ${imageSelectMode ? 'is-image-select-mode' : 'is-image-detection-mode'}`} aria-label={`Images on page ${pageNumber}`}>
       {imageRegions.map((region) => <PdfImageObject key={region.key} file={file} pageNumber={pageNumber} pageCanvas={canvas.current} pageSize={pageSize} region={region} imageEdit={imageEdits.find((edit) => edit.key === region.key)} selected={selectedImage?.page === pageNumber && selectedImage?.key === region.key} selectedImage={selectedImage} onSelect={onSelectImage} onOpen={onImageOpen} onChange={onImageEdit} onDelete={onImageDelete} onDuplicate={onImageDuplicate} pageWidth={displayWidth || pageWidth} pageHeight={displayHeight || pageHeight} candidate />)}
     </div>}
     {textEdits.filter((edit) => !edit.isNew && edit.backgroundColor && !edit.sourceCoverRects?.length).map((edit) => <span className="pdf-text-source-cover" key={`cover-${edit.key}`} aria-hidden="true" style={{ left: `${(edit.coverX ?? edit.x) * 100}%`, top: `${(edit.coverY ?? edit.y) * 100}%`, width: `${Math.min(1 - (edit.coverX ?? edit.x), edit.coverWidth || edit.width) * 100}%`, height: `${Math.min(1 - (edit.coverY ?? edit.y), edit.coverHeight || edit.height) * 100}%`, backgroundColor: edit.backgroundColor }} />)}
@@ -3527,7 +3690,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     {textEdits.map((edit) => {
       const preview = resolvedSelectedText?.key === edit.key ? resolvedSelectedText : edit
       const layout = getTextEditDisplayLayout(preview, pageWidth, pageHeight)
-      return <span className={`pdf-text-edit-preview ${edit.isNew ? 'is-new-text' : ''} ${edit.isNew && selectedTextBox?.page === pageNumber && selectedTextBox?.key === edit.key ? 'is-selected-text' : ''} `} key={edit.key} style={{ left: `${layout.left * 100}%`, top: `${layout.top * 100}%`, width: `${layout.width / (edit.horizontalScale || 1) * 100}%`, height: `${layout.height * 100}%`, fontSize: `${Math.max(.1, (edit.previewFontScale || edit.fontScale || edit.height * 0.8) * pageHeight)}px`, letterSpacing: edit.letterSpacingPt ? `${edit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : edit.letterSpacing ? `${edit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: layout.transform, lineHeight: `${Math.max(.1, (edit.lineHeightScale || edit.fontScale * 1.2) * pageHeight)}px`, fontFamily: edit.previewFontFamily || edit.fontFamily || 'sans-serif', fontWeight: edit.fontWeight || '400', fontStyle: edit.fontStyle || 'normal', color: edit.color || '#111', opacity: edit.opacity ?? 1, textAlign: edit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: edit.isNew || !edit.sourceLineCount ? 'pre-wrap' : 'pre', overflow: 'hidden' }} onClick={!edit.isNew ? (event) => { event.stopPropagation(); onTextObjectSelected(); if (selectedText?.key !== edit.key) setSelectedText(edit) } : undefined} onDoubleClick={!edit.isNew ? (event) => openEditedText(event, edit) : undefined} onPointerDown={(event) => { if (edit.isNew || !event.target.closest('.pdf-text-box-resize')) startBoxGesture(event, edit) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} title={edit.isNew ? 'Click to select; Delete or Backspace to remove; drag to move; drag an edge or corner to resize' : 'Click to select, drag to move, drag a handle to resize, and double-click to edit'}><span className="pdf-text-edit-content">{renderStyledText(edit.text, edit.styleRanges, pageHeight, pageSize?.height || 792, edit)}</span>{edit.isNew && <button type="button" className="pdf-text-box-delete" aria-label="Delete text box" title="Delete text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectTextBox(null); onTextDelete({ ...edit, page: pageNumber }) }}>×</button>}{edit.isNew && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, edit, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
+      return <span className={`pdf-text-edit-preview ${edit.isNew ? 'is-new-text' : ''} ${edit.isNew && selectedTextBox?.page === pageNumber && selectedTextBox?.key === edit.key ? 'is-selected-text' : ''} `} key={edit.key} style={{ left: `${layout.left * 100}%`, top: `${layout.top * 100}%`, width: `${layout.width / (edit.horizontalScale || 1) * 100}%`, height: `${layout.height * 100}%`, fontSize: `${Math.max(.1, (edit.previewFontScale || edit.fontScale || edit.height * 0.8) * pageHeight)}px`, letterSpacing: edit.letterSpacingPt ? `${edit.letterSpacingPt * pageHeight / (pageSize?.height || 792)}px` : edit.letterSpacing ? `${edit.letterSpacing}px` : 'normal', transformOrigin: '0 0', transform: layout.transform, lineHeight: `${Math.max(.1, (edit.lineHeightScale || edit.fontScale * 1.2) * pageHeight)}px`, fontFamily: edit.previewFontFamily || edit.fontFamily || 'sans-serif', fontWeight: edit.fontWeight || '400', fontStyle: edit.fontStyle || 'normal', color: edit.color || '#111', opacity: edit.opacity ?? 1, textAlign: edit.alignment || 'left', backgroundColor: 'transparent', textTransform: 'none', whiteSpace: edit.isNew || !edit.sourceLineCount ? 'pre-wrap' : 'pre', overflow: 'hidden' }} onClick={!edit.isNew ? (event) => { event.stopPropagation(); onTextObjectSelected(); if (selectedText?.key !== edit.key) setSelectedText(edit) } : undefined} onDoubleClick={(event) => openEditedText(event, edit)} onPointerDown={(event) => { if (edit.isNew || !event.target.closest('.pdf-text-box-resize')) startBoxGesture(event, edit) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} title={edit.isNew ? 'Click to select; Delete or Backspace to remove; drag to move; drag an edge or corner to resize' : 'Click to select, drag to move, drag a handle to resize, and double-click to edit'}><span className="pdf-text-edit-content">{renderStyledText(edit.text, edit.styleRanges, pageHeight, pageSize?.height || 792, edit)}</span>{edit.isNew && <button type="button" className="pdf-text-box-delete" aria-label="Delete text box" title="Delete text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectTextBox(null); onTextDelete({ ...edit, page: pageNumber }) }}>×</button>}{edit.isNew && ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, edit, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>
     })}
     {resolvedSelectedText && !resolvedSelectedText.isNew && <span className="pdf-selected-text-box" style={{ left: `${resolvedSelectedText.x * 100}%`, top: `${getTextEditDisplayLayout(resolvedSelectedText, pageWidth, pageHeight).visualTop * 100}%`, width: `${resolvedSelectedText.width * 100}%`, height: `${resolvedSelectedText.height * 100}%` }} aria-label="Selected text box" title="Double-click to edit; drag to reposition; use the handles to resize" onDoubleClick={(event) => openEditedText(event, resolvedSelectedText)} onPointerDown={(event) => startBoxGesture(event, resolvedSelectedText)} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture}>{['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map((edge) => <span key={edge} className={`pdf-text-box-resize edge-${edge}`} role="presentation" onPointerDown={(event) => { event.stopPropagation(); startBoxGesture(event, resolvedSelectedText, edge) }} onPointerMove={moveBoxGesture} onPointerUp={endBoxGesture} onPointerCancel={endBoxGesture} />)}</span>}
     {selectedToolbarEdit && !activeTextEdit && <div className="pdf-text-selection-toolbar" style={{ left: `${selectedToolbarLayout.visualLeft * 100}%`, top: `${Math.max(6, selectedToolbarLayout.visualTop * pageHeight - 44)}px` }} aria-label="Selected text box quick actions" onPointerDown={event => event.preventDefault()}><span>Text box</span><button type="button" onClick={event => openEditedText(event, selectedToolbarEdit)}>Edit</button><button type="button" className="danger" onClick={() => { onTextEdit({ ...selectedToolbarEdit, page: pageNumber, text: '' }); setSelectedText(null); onSelectTextBox(null) }}>Delete</button></div>}
@@ -3535,8 +3698,8 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     {activeTextEdit && !preserveSourceLayout && !activeTextEdit.isNew && activeTextEdit.sourceCoverRects?.map((rect, index) => <span key={`active-cover-${index}`} className="pdf-text-edit-cover" aria-hidden="true" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%`, backgroundColor: rect.backgroundColor }} />)}
     {activeTextEdit && <>
       <div className="pdf-text-format-ribbon" style={{ left: `${activeInputLayout.visualLeft * 100}%`, top: `${Math.max(6, activeInputLayout.visualTop * pageHeight - 46)}px` }} aria-label="Text formatting controls">
-        <select aria-label="Font family" value={textStyle?.localFontId ? `local:${textStyle.localFontId}` : textStyle?.fontFamily || 'Helvetica'} onChange={event => onSelectTextFont?.(event.target.value)}>{!PDF_TEXT_FONTS.includes(textStyle?.fontFamily) && !textStyle?.localFontId && <option value={textStyle.fontFamily}>{textStyle.fontFamily}</option>}{PDF_TEXT_FONTS.map(font => <option key={font} value={font}>{font}</option>)}{localFonts.map(font => <option key={font.id} value={`local:${font.id}`}>{font.name} · local</option>)}</select>
-        <select aria-label="Font size" value={textStyle?.fontSize || 14} onChange={event => onTextStyleActivate?.({...textStyle,fontSize:Number(event.target.value)})}>{[...new Set([8,10,12,14,16,18,24,32,48,textStyle?.fontSize || 14])].sort((a,b)=>a-b).map(size=><option key={size} value={size}>{size} pt</option>)}</select>
+        <ThemedSelect ariaLabel="Font family" value={textStyle?.localFontId ? `local:${textStyle.localFontId}` : textStyle?.fontFamily || 'Helvetica'} onChange={event => onSelectTextFont?.(event.target.value)} options={[...(!PDF_TEXT_FONTS.includes(textStyle?.fontFamily) && !textStyle?.localFontId ? [{ value: textStyle.fontFamily, label: textStyle.fontFamily }] : []), ...PDF_TEXT_FONTS.map(font => ({ value: font, label: font })), ...localFonts.map(font => ({ value: `local:${font.id}`, label: `${font.name} · local` }))]} />
+        <ThemedSelect ariaLabel="Font size" value={textStyle?.fontSize || 14} onChange={event => onTextStyleActivate?.({...textStyle,fontSize:Number(event.target.value)})} options={[...new Set([8,10,12,14,16,18,24,32,48,textStyle?.fontSize || 14])].sort((a,b)=>a-b).map(size => ({ value: size, label: `${size} pt` }))} />
         <span className="pdf-text-format-divider" />
         {['left','center','right'].map(alignment => <button key={alignment} type="button" className={`pdf-text-align-button align-${alignment} ${(activeTextEdit.alignment || 'left') === alignment ? 'active' : ''}`} aria-label={`${alignment} align`} aria-pressed={(activeTextEdit.alignment || 'left') === alignment} onMouseDown={event=>event.preventDefault()} onClick={()=>setActiveTextEdit(current=>current?{...current,alignment}:current)} />)}
         <button type="button" className={Boolean(textStyle?.bold) ? 'active' : ''} aria-label="Bold" aria-pressed={Boolean(textStyle?.bold)} onMouseDown={event=>event.preventDefault()} onClick={()=>onTextStyleActivate?.({...textStyle,bold:!textStyle?.bold})}><b>B</b></button>
@@ -3578,7 +3741,7 @@ function PageThumbnailList({ file, pageCount, currentPage, onSelectPage }) {
   </div>
 }
 
-function PageThumbnail({ file, pageNumber, pageSize, root }) {
+function PageThumbnail({ file, pageNumber, pageSize, root, targetWidth = 168 }) {
   const canvas = useRef(null)
   const [visible, setVisible] = useState(false)
   const [previewError, setPreviewError] = useState(false)
@@ -3596,10 +3759,10 @@ function PageThumbnail({ file, pageNumber, pageSize, root }) {
     if (!visible || !canvas.current) return
     const target = canvas.current, job = new AbortController()
     setPreviewError(false)
-    import('../pdfEngine').then(({ renderPdfThumbnail }) => job.signal.aborted ? null : renderPdfThumbnail(file, pageNumber, target, 168, 5, { signal: job.signal }))
+    import('../pdfEngine').then(({ renderPdfThumbnail }) => job.signal.aborted ? null : renderPdfThumbnail(file, pageNumber, target, targetWidth, 5, { signal: job.signal }))
       .then(result => { if (!job.signal.aborted && result?.status === 'FAILED') setPreviewError(true) })
       .catch(() => { if (!job.signal.aborted) setPreviewError(true) })
     return () => { job.abort(); target.width = 0; target.height = 0 }
-  }, [file, pageNumber, visible])
+  }, [file, pageNumber, visible, targetWidth])
   return <span className="acrobat-thumb-paper" aria-hidden="true"><canvas ref={canvas} aria-hidden="true" />{previewError && <span className="thumbnail-error">Preview unavailable</span>}</span>
 }

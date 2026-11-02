@@ -28,7 +28,7 @@ import { imageDoubleClickPlan } from "../src/editor/imageInteraction.js";
 const PAGE_WIDTH = 600;
 const PAGE_HEIGHT = 800;
 const standardFontDataUrl =
-  path.resolve("node_modules/pdfjs-dist/standard_fonts") + path.sep;
+  path.resolve('node_modules/pdfjs-dist/standard_fonts').split(path.sep).join('/') + '/';
 
 const failures = [];
 let checkCount = 0;

@@ -21,7 +21,7 @@ const inserted = rebaseTextStyleRanges([{start:7,end:18,fontWeight:'700'}], befo
 assert.equal(textStyleAt(inserted,18).fontWeight, '700')
 const pdf = await PDFDocument.create(); pdf.addPage([600,800])
 const bytes = await applyOperations(await pdf.save(), [{type:'text',isNew:true,page:1,x:.05,y:.1,width:.9,height:.15,text:before,fontFamily:'Times New Roman',fontSize:18,fontWeight:'400',color:'#000000',styleRanges:ranges}])
-const loadingTask = pdfjs.getDocument({data:bytes,disableFontFace:true,standardFontDataUrl:path.resolve('node_modules/pdfjs-dist/standard_fonts') + path.sep})
+const loadingTask = pdfjs.getDocument({data:bytes,disableFontFace:true,standardFontDataUrl:path.resolve('node_modules/pdfjs-dist/standard_fonts').split(path.sep).join('/') + '/'})
 const loaded = await loadingTask.promise
 const page = await loaded.getPage(1), content = await page.getTextContent()
 const items = content.items.filter(x=>x.str?.trim())
@@ -49,7 +49,7 @@ fixturePage.drawText('NEIGHBORING TABLE', {x:325,y:550,size:12,font:fixtureFont}
 const fixtureBytes = await fixture.save()
 const erased = await applyOperations(fixtureBytes,[{type:'text',page:1,text:'',oldText:'Selected first line\nSelected wide last line',x:.05,y:.2,width:.85,height:.4,sourceCoverRects:[{x:.05,y:.19,width:.4,height:.035,backgroundColor:'#ffffff'},{x:.05,y:.54,width:.8,height:.035,backgroundColor:'#ffffff'}]}])
 async function pixels(bytes) {
-  const task=pdfjs.getDocument({data:new Uint8Array(bytes),standardFontDataUrl:path.resolve('node_modules/pdfjs-dist/standard_fonts')+path.sep})
+  const task=pdfjs.getDocument({data:new Uint8Array(bytes),standardFontDataUrl:path.resolve('node_modules/pdfjs-dist/standard_fonts').split(path.sep).join('/') + '/'})
   const doc=await task.promise, page=await doc.getPage(1), viewport=page.getViewport({scale:1})
   const canvas=createCanvas(viewport.width,viewport.height), ctx=canvas.getContext('2d')
   await page.render({canvasContext:ctx,viewport}).promise
@@ -68,7 +68,7 @@ const colored = await PDFDocument.create(), colorPage=colored.addPage([600,800])
 colorPage.drawText('Black text', {x:30,y:650,font:colorFont,size:14})
 colorPage.drawText('[10]', {x:120,y:650,font:colorFont,size:14,color:rgb(0,1,0)})
 colorPage.drawText('2', {x:150,y:655,font:colorFont,size:8,color:rgb(0,0,1)})
-const colorTask=pdfjs.getDocument({data:await colored.save(),standardFontDataUrl:path.resolve('node_modules/pdfjs-dist/standard_fonts')+path.sep})
+const colorTask=pdfjs.getDocument({data:await colored.save(),standardFontDataUrl:path.resolve('node_modules/pdfjs-dist/standard_fonts').split(path.sep).join('/') + '/'})
 const colorDoc=await colorTask.promise, colorPdfPage=await colorDoc.getPage(1), colorItems=(await colorPdfPage.getTextContent()).items
 const actualColors=extractTextColors(await colorPdfPage.getOperatorList(),pdfjs.OPS,colorItems)
 assert.equal(actualColors[colorItems.findIndex(x=>x.str==='[10]')],'#00ff00')

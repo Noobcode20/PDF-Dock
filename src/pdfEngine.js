@@ -1,3 +1,4 @@
+import { previewRasterSize } from './editor/renderBudget.js'
 import { resolveFontFamilyStack } from "./editor/fonts.js"
 import { extractTextColorStyles } from './editor/pdfTextColors.js'
 import { abortable } from './editor/cancellation'
@@ -218,6 +219,7 @@ async function extractGroups(file, options, onProgress) {
 
 const pdfJsDocumentCache = new WeakMap()
 const pdfJsLoadingTasks = new WeakMap()
+const pdfJsDocumentGenerations = new WeakMap()
 const pdfCanvasRenderTasks = new WeakMap()
 const pdfCanvasRenderVersions = new WeakMap()
 const pdfCanvasQueuedJobs = new WeakMap()
@@ -233,7 +235,7 @@ const pdfFormWidgetCache = new WeakMap()
 const canvasRenderQueue = []
 let canvasRenderSequence = 0
 let activeCanvasRenders = 0
-const MAX_ACTIVE_CANVAS_RENDERS = 2
+const MAX_ACTIVE_CANVAS_RENDERS = 1
 
 function pumpCanvasRenderQueue() {
   while (activeCanvasRenders < MAX_ACTIVE_CANVAS_RENDERS && canvasRenderQueue.length) {
@@ -275,12 +277,24 @@ async function getPdfJsDocument(fileOrBytes) {
     if (!(fileOrBytes instanceof Uint8Array) && fileOrBytes && typeof fileOrBytes === 'object') {
       const cached = pdfJsDocumentCache.get(fileOrBytes)
       if (cached) return await cached
+      const generation = {}
+      pdfJsDocumentGenerations.set(fileOrBytes, generation)
       const pending = readFile(fileOrBytes).then((data) => {
-        const task = pdfjs.getDocument({ data: data.slice(), fontExtraProperties: true, wasmUrl: pdfImageWasmUrl })
+        // A closed tab may finish reading its File after disposal. Do not start
+        // an orphan worker or let an old rejection evict a newer document.
+        if (pdfJsDocumentGenerations.get(fileOrBytes) !== generation) throw new DOMException('PDF was closed.', 'AbortError')
+        const task = pdfjs.getDocument({ data, fontExtraProperties: true, wasmUrl: pdfImageWasmUrl })
         task.onPassword = (update,reason) => { window.dispatchEvent(new CustomEvent('pdfking-password',{detail:{incorrect:reason===pdfjs.PasswordResponses.INCORRECT_PASSWORD,resolve:password=>{if(password===null)void task.destroy();else{fileOrBytes.pdfPassword=password;update(password)}}}})) }
         pdfJsLoadingTasks.set(fileOrBytes, task)
         return task.promise
-      }).catch((error) => { pdfJsDocumentCache.delete(fileOrBytes); pdfJsLoadingTasks.delete(fileOrBytes); throw error })
+      }).catch((error) => {
+        if (pdfJsDocumentGenerations.get(fileOrBytes) === generation) {
+          pdfJsDocumentCache.delete(fileOrBytes)
+          pdfJsLoadingTasks.delete(fileOrBytes)
+          pdfJsDocumentGenerations.delete(fileOrBytes)
+        }
+        throw error
+      })
       pdfJsDocumentCache.set(fileOrBytes, pending)
       return await pending
     }
@@ -291,9 +305,11 @@ async function getPdfJsDocument(fileOrBytes) {
 }
 
 export function disposePdfFile(file) {
+  pdfJsDocumentGenerations.delete(file)
   const task = pdfJsLoadingTasks.get(file)
   pdfJsLoadingTasks.delete(file)
   pdfJsDocumentCache.delete(file)
+  for (const cache of [pdfTextPageCache, pdfSearchTextCache, pdfSearchResultCache, pdfOutlineCache, pdfLinkCache, pdfFormWidgetCache]) cache.delete(file)
   if (task) void task.destroy().catch(() => {})
 }
 
@@ -954,19 +970,46 @@ async function processKnown(toolId, files, options, onProgress) {
   if (['merge-pdf'].includes(toolId)) {
     requirePdf(files, 2)
     const result = await PDFDocument.create()
+    const sources = []
     for (let i = 0; i < files.length; i += 1) {
       const { pdf } = await loadPdf(files[i])
-      const pages = await result.copyPages(pdf, pdf.getPageIndices())
-      pages.forEach((page) => result.addPage(page))
-      progress(onProgress, (i + 1) / files.length, `Merged ${i + 1} of ${files.length} files`)
+      sources.push(await result.copyPages(pdf, pdf.getPageIndices()))
+      progress(onProgress, (i + 1) / files.length, `Prepared ${i + 1} of ${files.length} files`)
     }
+    if (options.mergeMode === 'custom' && Array.isArray(options.mergePageOrder)) {
+      const sourceIndexes = new Map(files.map((sourceFile, index) => [`${sourceFile.name}:${sourceFile.size}:${sourceFile.lastModified}`, index]))
+      const added = new Set()
+      for (const page of options.mergePageOrder) {
+        const sourceIndex = sourceIndexes.get(page.fileKey)
+        const pageIndex = Number(page.page) - 1
+        const key = `${sourceIndex}:${pageIndex}`
+        if (sourceIndex === undefined || !Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= sources[sourceIndex].length || added.has(key)) continue
+        result.addPage(sources[sourceIndex][pageIndex])
+        added.add(key)
+      }
+      for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+        for (let pageIndex = 0; pageIndex < sources[sourceIndex].length; pageIndex += 1) {
+          const key = `${sourceIndex}:${pageIndex}`
+          if (!added.has(key)) result.addPage(sources[sourceIndex][pageIndex])
+        }
+      }
+    } else if (options.mergeMode === 'interlaced') {
+      const longest = Math.max(...sources.map((pages) => pages.length))
+      for (let pageIndex = 0; pageIndex < longest; pageIndex += 1) {
+        for (const pages of sources) if (pages[pageIndex]) result.addPage(pages[pageIndex])
+      }
+    } else sources.flat().forEach((page) => result.addPage(page))
     return [output('merged.pdf', await savePdf(result))]
   }
 
   if (['split-pdf', 'extract-pages'].includes(toolId)) {
     requirePdf(files)
-    const outputs = await extractGroups(file, { ...options, ranges: toolId === 'extract-pages' ? (options.pages ?? options.ranges) : options.ranges, groupRanges: toolId === 'extract-pages' ? false : options.groupRanges, mode: toolId === 'split-pdf' ? (options.mode || options.splitMode) : undefined }, onProgress)
-    if (toolId === 'extract-pages' && outputs.length !== 1) fail('Extract pages creates one PDF. Use split mode “all” to create a separate PDF for each page.')
+    const outputs = await extractGroups(file, {
+      ...options,
+      ranges: toolId === 'extract-pages' ? (options.pages ?? options.ranges) : options.ranges,
+      groupRanges: toolId === 'extract-pages' ? false : options.groupRanges,
+      mode: toolId === 'split-pdf' ? (options.mode || options.splitMode) : options.extractMode === 'each' ? 'all' : undefined,
+    }, onProgress)
     return outputs
   }
 
@@ -1553,11 +1596,11 @@ export async function renderPdfPage(file, pageNumber, canvas, scale = 1, renderO
         const page = await doc.getPage(number)
         if (!current()) return cancelled()
         const viewport = page.getViewport({ scale: Math.max(0.01, Math.min(8, Number(scale) || 1)), rotation: page.rotate + (Number(renderOptions.rotation) || 0) })
-        const deviceScale = renderOptions.thumbnail ? 1 : Math.min(2.5, Math.max(1, window.devicePixelRatio || 1))
-        const outputScale = Math.max(0.5, Math.min(deviceScale, Math.sqrt(16_000_000 / Math.max(1, viewport.width * viewport.height))))
+        const raster = previewRasterSize(viewport.width, viewport.height, window.devicePixelRatio, renderOptions.thumbnail)
+        const outputScale = raster.scale
         staging = document.createElement('canvas')
-        staging.width = Math.max(1, Math.ceil(viewport.width * outputScale))
-        staging.height = Math.max(1, Math.ceil(viewport.height * outputScale))
+        staging.width = raster.width
+        staging.height = raster.height
         const context = staging.getContext('2d', { alpha: false })
         if (!context) fail('This browser could not create a canvas for PDF rendering.')
         const task = page.render({ canvas: staging, canvasContext: context, viewport, transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0] })
@@ -1671,7 +1714,8 @@ async function getSearchablePage(file, pageNumber) {
   }
   const result = { text, items, width: viewport.width, height: viewport.height }
   pages.set(pageNumber, result)
-  while (pages.size > 48) pages.delete(pages.keys().next().value)
+  const retainedBytes = () => [...pages.values()].reduce((total, entry) => total + entry.text.length * 2 + entry.items.length * 128, 0)
+  while (pages.size > 8 || retainedBytes() > 2 * 1024 * 1024) pages.delete(pages.keys().next().value)
   page.cleanup()
   return result
 }
@@ -1692,7 +1736,7 @@ function rememberIndexedSearchText(file, pageNumber, text) {
   index.pages.delete(pageNumber)
   index.pages.set(pageNumber, text)
   index.bytes += text.length * 2
-  while (index.bytes > 32 * 1024 * 1024 && index.pages.size > 1) {
+  while (index.bytes > 4 * 1024 * 1024 && index.pages.size > 0) {
     const [oldestPage, oldestText] = index.pages.entries().next().value
     index.pages.delete(oldestPage)
     index.bytes -= oldestText.length * 2
@@ -1758,8 +1802,11 @@ export async function searchPdfDocument(file, query, options = {}) {
   const response = { results, indexedPages: candidatePages ? candidatePages.length : doc.numPages, pageCount: doc.numPages }
   if (!candidatePages && results.length <= 10_000) {
     resultCache ||= new Map()
-    resultCache.set(searchKey, response)
-    while (resultCache.size > 8) resultCache.delete(resultCache.keys().next().value)
+    const estimatedBytes = (entry) => entry.results.reduce((total, match) => total + (match.text.length + match.context.length) * 2 + match.rects.length * 64 + 128, 0)
+    // A large result remains usable by the current search UI without retaining
+    // another copy in the reusable query cache.
+    if (estimatedBytes(response) <= 2 * 1024 * 1024) resultCache.set(searchKey, response)
+    while (resultCache.size > 2) resultCache.delete(resultCache.keys().next().value)
     pdfSearchResultCache.set(file, resultCache)
   }
   return response
@@ -2081,7 +2128,7 @@ export async function renderPdfThumbnail(file, pageNumber, canvas, targetWidth =
   try {
     const size = await inspectPdfPageSize(file, pageNumber)
     if (renderOptions.signal?.aborted) return { status: 'CANCELLED' }
-    return renderPdfPage(file, pageNumber, canvas, Math.min(1, targetWidth / size.width), { ...renderOptions, priority, thumbnail: true })
+    return renderPdfPage(file, pageNumber, canvas, Math.min(3, targetWidth / size.width), { ...renderOptions, priority })
   } catch (error) { return renderOptions.signal?.aborted ? { status: 'CANCELLED' } : { status: 'FAILED', error } }
 }
 
