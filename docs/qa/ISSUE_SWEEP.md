@@ -8,7 +8,7 @@ Review the current app and all GitHub reports, fix verified defects, improve con
 - Base: origin/master `99415c3`.
 - Existing PR #11 is conflicting; its substantive fixes appear integrated in beta.6. Audit for remaining unique work before disposition.
 - All 20 issue reports are open. Full report bodies are preserved in `github-issues-2026-11-04.json`.
-- Baseline build and regression results: pending.
+- Baseline build and complete Node regression suite: passed. Build reports existing large-chunk warnings.
 
 ## Issue inventory
 | Issue | Report | Status |
@@ -54,7 +54,8 @@ Review the current app and all GitHub reports, fix verified defects, improve con
 - Push only coherent work, with issue-linked PR descriptions and validation evidence.
 
 ## Integration log
-- Inventory recorded; delegation and baseline verification pending.
+- Inventory recorded; nine isolated GPT-6 Luna lanes launched through Codex.
+- Tool-output delegate returned without changes. Parent implemented editable names, explicit app/device/both destinations, neutral merge rows, and destination regression checks. Targeted tests and production build passed; runtime workflow review remains pending.
 
 ## Remaining work
 All lanes, independent review, integrated verification, and push.

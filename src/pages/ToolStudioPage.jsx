@@ -28,6 +28,8 @@ import React, { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef
 import { Icon } from '../icons'
 import { ToolCard } from '../components/ToolCard'
 import { ImageInspector } from '../components/ImageInspector'
+import { OutputSaveControls } from '../components/OutputSaveControls'
+import { outputFileName, saveToolOutput } from '../outputStorage'
 import { allTools } from '../toolsData'
 import { forgetPdfCopy, rememberPdf, saveOutput } from '../fileServices'
 import { recentFilesBackend } from '../recentFiles'
@@ -544,16 +546,18 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
     }
   }
 
-  const save = async (output, pendingOutputs = outputs) => {
+  const save = async (output, pendingOutputs = outputs, { name = output.saveName ?? output.name, destination = output.saveDestination || 'device' } = {}) => {
     if (savingRef.current) return false
     savingRef.current = true
     try {
-      const result = await saveOutput(output, { recordRecent: !['unlock-pdf', 'compress-pdf'].includes(toolId) })
+      name = outputFileName(name, output.name)
+      const result = await saveToolOutput({ ...output, name }, { destination, exportFile: saveOutput, library: recentFilesBackend() })
       if (!result) return false
       const remaining = pendingOutputs.filter((item) => item !== output)
       setOutputs(remaining)
       onDirtyChange(remaining.length > 0)
-      setMessage(`Saved ${output.name}`)
+      setError('')
+      setMessage(`Saved ${name}${destination === 'app' ? ' in PDF Dock' : destination === 'both' ? ' in PDF Dock and on your device' : ' to your device'}`)
       return remaining
     } catch (cause) { setError(cause?.message || 'Could not save the output file.'); return false }
     finally { savingRef.current = false }
@@ -753,13 +757,14 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
           <input ref={picker} hidden type="file" multiple={!singleDocumentTools.has(toolId)} accept={inputAccept(toolId)} onChange={(event) => { if (event.target.files?.length) { addFiles(event.target.files); setFileSelectorOpen(false) } event.target.value = '' }} />
           {error && <div className="operation-error" role="alert">{error}</div>}
           {message && <div className="operation-message" role="status">{message}{progress && <progress value={progress.value} max="1" />}{busy && <button type="button" onClick={() => { jobController.current?.abort(); jobId.current += 1; setBusy(false); setProgress(null); setMessage('Cancel requested…') }}>Cancel</button>}</div>}
-          {outputs.length > 0 && <div className="output-list"><h3>Ready to save</h3>{outputs.map((output) => <div className="output-item" key={output.name}>
+          {outputs.length > 0 && <div className="output-list"><h3>Ready to save</h3>{outputs.map((output, outputIndex) => <div className="output-item" key={outputIndex}>
             {output.compression && <div className="compression-summary" aria-label={`Compression result for ${output.name}`}>
               <span>Original size<strong>{formatBytes(output.compression.originalSize)}</strong></span>
               <span>Compressed size<strong>{formatBytes(output.compression.compressedSize)}</strong></span>
               <span>Size reduction<strong>{(output.compression.reduction * 100).toFixed(1)}%</strong></span>
             </div>}
-            <div className="output-row"><span><Icon name="file" size={15} />{output.name}<small>{formatBytes(output.data.byteLength)}</small></span><div className="output-actions">{(tool.category === 'convert' || output.compression) && <button className="output-view-button" type="button" onClick={() => viewOutput(output)}>Preview</button>}<button className="browse-button" type="button" onClick={() => save(output)}>Save file <Icon name="arrow" size={14} /></button></div></div>
+            <div className="output-row"><span><Icon name="file" size={15} />{output.name}<small>{formatBytes(output.data.byteLength)}</small></span></div>
+            <OutputSaveControls output={output} onSettingsChange={patch => setOutputs(current => current.map(item => item === output ? { ...item, ...patch } : item))} onPreview={() => viewOutput(output)} onSave={(name, destination) => save(output, outputs, { name, destination })} />
             {output.compression && output.message && <p className="compression-result-note">{output.message}</p>}
           </div>)}</div>}
         </section>
