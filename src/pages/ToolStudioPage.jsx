@@ -1279,7 +1279,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     }catch(cause){setError(cause.message||'Could not save PDF.');return false}finally{savingRef.current=false}
   }
   const save = async () => {if(outputs[0]){try{return await saveOutput(outputs[0])}catch(cause){setError(cause.message);return false}}return saveDocument('export')}
-  const savePendingEdits = () => saveDocument('save')
+  const savePendingEdits = () => saveDocument('library')
   const saveCurrentToDevice = () => saveDocument('save-as')
   const printPdf = async () => {if(busy||!file)return;try{if(redaction.length)throw new Error('Apply or remove redaction marks before printing.');const current=await commitCurrent();const data=new Uint8Array(await current.arrayBuffer());if(window.pdfKing?.printPdf){const printed=await window.pdfKing.printPdf({name:current.name,data});if(printed===false)setMessage('Printing cancelled.')}else{const url=URL.createObjectURL(new Blob([data],{type:'application/pdf'}));window.open(url);setTimeout(()=>URL.revokeObjectURL(url),60000)}}catch(cause){setError(cause.message)}}
   const applyChangesInApp = async () => {const result=await run();return {ok:Boolean(result),needsFileSave:isSessionDirty(sessionRef.current)}}

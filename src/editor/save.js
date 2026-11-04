@@ -11,7 +11,11 @@ export async function writeEditorDocument({
   if (!file) throw new Error("Open a PDF first.");
   const data = new Uint8Array(await file.arrayBuffer());
   let path = null;
-  if (bridge?.saveFile) {
+  if (mode === "library") {
+    // Updating the app library is intentionally independent of the original
+    // source path: never write an opened source PDF as a side effect of Save.
+    path = session.sourcePath;
+  } else if (bridge?.saveFile) {
     const result = await bridge.saveFile({
       name: file.name,
       data,
@@ -19,7 +23,7 @@ export async function writeEditorDocument({
     });
     if (result.canceled) return null;
     path = result.filePath;
-  } else await download({ name: file.name, data, mimeType: "application/pdf" });
+  } else if (mode !== "library") await download({ name: file.name, data, mimeType: "application/pdf" });
   try {
     await recordRecent?.({
       ...file,
