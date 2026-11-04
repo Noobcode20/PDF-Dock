@@ -243,6 +243,23 @@ assert.equal(
   pushHistory({ past: [], future: [{}] }, { files }).future.length,
   0,
 );
+// A coalesced image drag records its pre-drag snapshot on the first tick;
+// subsequent ticks update the live value without adding another entry.
+const imageBefore = { imageEdits: [{ key: "image-1", rotation: 0 }] };
+const firstDragTick = pushHistory({ past: [], future: [] }, imageBefore);
+assert.equal(firstDragTick.past.length, 1);
+assert.equal(firstDragTick.future.length, 0);
+const undoDrag = {
+  past: firstDragTick.past.slice(0, -1),
+  future: [...firstDragTick.future, { imageEdits: [{ key: "image-1", rotation: 30 }] }],
+};
+const redoDrag = {
+  past: [...undoDrag.past, imageBefore],
+  future: undoDrag.future.slice(0, -1),
+};
+assert.deepEqual(redoDrag.past, [imageBefore]);
+assert.equal(redoDrag.future.length, 0);
+assert.equal(pushHistory(redoDrag, { imageEdits: [{ key: "image-1", rotation: 60 }] }).future.length, 0);
 assert.equal(systemFontKey("ArialMT-9742", 400, "italic"), "Arial-Italic");
 assert.equal(normalizeFont("Times", true, true), "Times-BoldItalic");
 const calls = [],

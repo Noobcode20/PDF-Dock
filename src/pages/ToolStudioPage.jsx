@@ -1083,6 +1083,9 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const undoEdit = () => {
     const { past, future } = editHistory
     if (!past.length) return
+    cropSession.current.key = null
+    if (cropSession.current.timer) clearTimeout(cropSession.current.timer)
+    cropSession.current.timer = null
     const previous = past[past.length - 1]
     setEditHistory({ past: past.slice(0, -1), future: boundHistory([...future, currentEditSnapshot.current]) })
     applyEditSnapshot(previous)
@@ -1090,6 +1093,9 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
   const redoEdit = () => {
     const { past, future } = editHistory
     if (!future.length) return
+    cropSession.current.key = null
+    if (cropSession.current.timer) clearTimeout(cropSession.current.timer)
+    cropSession.current.timer = null
     const next = future[future.length - 1]
     setEditHistory({ past: boundHistory([...past, currentEditSnapshot.current]), future: future.slice(0, -1) })
     applyEditSnapshot(next)
@@ -1382,7 +1388,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     if (options.coalesce) {
       cropSession.current.key = key
       if (cropSession.current.timer) clearTimeout(cropSession.current.timer)
-      cropSession.current.timer = setTimeout(() => { cropSession.current.key = null }, 700)
+      cropSession.current.timer = setTimeout(() => { cropSession.current.key = null; cropSession.current.timer = null }, 700)
     } else {
       cropSession.current.key = null
       if (cropSession.current.timer) clearTimeout(cropSession.current.timer)
