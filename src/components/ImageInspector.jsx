@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Icon } from '../icons'
 
 const MAX_ROTATION = 180
 const MAX_SKEW = 60
@@ -72,7 +73,7 @@ export function ImageInspector({
       <div className="image-inspector image-inspector-empty">
         <p className="image-inspector-empty-title">No image selected</p>
         <p className="image-inspector-note">Click an outlined image on the page to select it, then edit its size, position, rotation, and crop.</p>
-        <button type="button" className="editor-open-button image-inspector-secondary-action" aria-label="Add a new image to the page" onClick={onAddImage} disabled={busy}>Add image</button>
+        <button type="button" className="editor-open-button image-inspector-secondary-action" aria-label="Add a new image to the page" onClick={onAddImage} disabled={busy}><Icon name="plus" size={16} />Add image</button>
       </div>
     )
   }
@@ -97,25 +98,25 @@ export function ImageInspector({
 
   return (
     <div className="image-inspector">
-      <section className="image-inspector-section" aria-label="Image source">
-        <h3>Source</h3>
+      <details className="image-inspector-section" aria-label="Image source" open>
+        <summary><span>Source</span><small>Manage image</small></summary>
         <div className="image-inspector-grid">
           <p className="image-inspector-note">Image on page {page}</p>
-          <button type="button" className="editor-open-button" aria-label="Add image" onClick={onAddImage} disabled={busy}>Add image</button>
+          <button type="button" className="editor-open-button" aria-label="Add image" title="Add image" onClick={onAddImage} disabled={busy}><Icon name="plus" size={16} /></button>
           <label className="image-replace-field">
             Replace image
             <input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" disabled={busy} onChange={handleReplacement} />
           </label>
-          <button type="button" className="editor-open-button" aria-label="Duplicate" onClick={onDuplicate} disabled={busy}>Duplicate</button>
-          <button type="button" className="editor-open-button danger" aria-label="Delete image" onClick={onDelete} disabled={busy}>Delete</button>
+          <button type="button" className="editor-open-button" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate} disabled={busy}><Icon name="copy" size={16} /></button>
+          <button type="button" className="editor-open-button danger" aria-label="Delete image" title="Delete image" onClick={onDelete} disabled={busy}><Icon name="trash" size={16} /></button>
         </div>
-      </section>
+      </details>
 
-      <section className="image-inspector-section" aria-label="Image transform">
-        <h3>Transform</h3>
+      <details className="image-inspector-section" aria-label="Image transform" open>
+        <summary><span>Transform</span><small>Rotate · flip · skew</small></summary>
         <div className="image-inspector-grid">
-          <button type="button" className="editor-open-button" aria-label="Rotate image left" onClick={() => onChange({ rotation: (rotationRaw - 90 + 360) % 360 })} disabled={busy}>Rotate left</button>
-          <button type="button" className="editor-open-button" aria-label="Rotate image right" onClick={() => onChange({ rotation: (rotationRaw + 90) % 360 })} disabled={busy}>Rotate right</button>
+          <button type="button" className="editor-open-button" aria-label="Rotate image left" title="Rotate image left" onClick={() => onChange({ rotation: (rotationRaw - 90 + 360) % 360 })} disabled={busy}><Icon name="undo" size={16} /></button>
+          <button type="button" className="editor-open-button" aria-label="Rotate image right" title="Rotate image right" onClick={() => onChange({ rotation: (rotationRaw + 90) % 360 })} disabled={busy}><Icon name="redo" size={16} /></button>
           <NumberField
             key={`${identity}-rotation`}
             label="Rotation (°)"
@@ -127,8 +128,8 @@ export function ImageInspector({
             disabled={busy}
             onCommit={(value) => onChange({ rotation: value })}
           />
-          <button type="button" className="editor-open-button" aria-label="Flip image horizontally" onClick={() => onChange({ flipHorizontal: !image.flipHorizontal })} disabled={busy}>Flip horizontal</button>
-          <button type="button" className="editor-open-button" aria-label="Flip image vertically" onClick={() => onChange({ flipVertical: !image.flipVertical })} disabled={busy}>Flip vertical</button>
+          <button type="button" className="editor-open-button" aria-pressed={Boolean(image.flipHorizontal)} aria-label="Flip image horizontally" title="Flip image horizontally" onClick={() => onChange({ flipHorizontal: !image.flipHorizontal })} disabled={busy}><Icon name="flipHorizontal" size={16} /></button>
+          <button type="button" className="editor-open-button" aria-pressed={Boolean(image.flipVertical)} aria-label="Flip image vertically" title="Flip image vertically" onClick={() => onChange({ flipVertical: !image.flipVertical })} disabled={busy}><Icon name="flipVertical" size={16} /></button>
           <NumberField
             key={`${identity}-skew`}
             label="Skew (°)"
@@ -140,13 +141,13 @@ export function ImageInspector({
             disabled={busy}
             onCommit={(value) => onChange({ skew: value })}
           />
-          <button type="button" className="editor-open-button" aria-label="Straighten image" onClick={() => onChange({ rotation: 0, skew: 0 })} disabled={busy}>Straighten</button>
-          <button type="button" className="editor-open-button" aria-label="Reset image transform" onClick={() => onChange({ rotation: 0, skew: 0, flipHorizontal: false, flipVertical: false })} disabled={busy}>Reset transform</button>
+          <button type="button" className="editor-open-button" aria-label="Straighten image" title="Straighten image" onClick={() => onChange({ rotation: 0, skew: 0 })} disabled={busy}><Icon name="straighten" size={16} /></button>
+          <button type="button" className="editor-open-button" aria-label="Reset image transform" title="Reset image transform" onClick={() => onChange({ rotation: 0, skew: 0, flipHorizontal: false, flipVertical: false })} disabled={busy}><Icon name="rotate" size={16} /></button>
         </div>
-      </section>
+      </details>
 
-      <section className="image-inspector-section" aria-label="Image size">
-        <h3>Size</h3>
+      <details className="image-inspector-section" aria-label="Image size">
+        <summary><span>Size</span><small>Dimensions and fit</small></summary>
         <div className="image-inspector-grid">
           <NumberField
             key={`${identity}-width`}
@@ -174,13 +175,13 @@ export function ImageInspector({
             <span>Lock aspect ratio</span>
             <input type="checkbox" aria-label="Lock aspect ratio" checked={Boolean(image.aspectLocked)} disabled={busy} onChange={(event) => onChange({ aspectLocked: event.target.checked })} />
           </label>
-          <button type="button" className="editor-open-button" aria-label="Fit image to page" onClick={() => onChange({ fitToPage: true })} disabled={busy}>Fit to page</button>
-          <button type="button" className="editor-open-button" aria-label="Fill image to page" onClick={() => onChange({ fillToPage: true })} disabled={busy}>Fill page</button>
+          <button type="button" className="editor-open-button" aria-label="Fit image to page" title="Fit image to page" onClick={() => onChange({ fitToPage: true })} disabled={busy}><Icon name="compress" size={16} /></button>
+          <button type="button" className="editor-open-button" aria-label="Fill image to page" title="Fill image to page" onClick={() => onChange({ fillToPage: true })} disabled={busy}><Icon name="expand" size={16} /></button>
         </div>
-      </section>
+      </details>
 
-      <section className="image-inspector-section" aria-label="Image position">
-        <h3>Position</h3>
+      <details className="image-inspector-section" aria-label="Image position">
+        <summary><span>Position</span><small>Placement on page</small></summary>
         <div className="image-inspector-grid">
           <NumberField
             key={`${identity}-x`}
@@ -205,10 +206,10 @@ export function ImageInspector({
             onCommit={(value) => onChange({ y: value / frameHeight })}
           />
         </div>
-      </section>
+      </details>
 
-      <section className="image-inspector-section" aria-label="Image crop">
-        <h3>Crop</h3>
+      <details className="image-inspector-section" aria-label="Image crop">
+        <summary><span>Crop</span><small>Trim edges</small></summary>
         <div className="image-inspector-grid">
           {['top', 'right', 'bottom', 'left'].map((side) => (
             <label className="image-crop-field" key={`${identity}-crop-${side}`}>
@@ -225,9 +226,9 @@ export function ImageInspector({
               />
             </label>
           ))}
-          <button type="button" className="editor-open-button" aria-label="Reset image crop" onClick={onResetCrop} disabled={busy}>Reset crop</button>
+          <button type="button" className="editor-open-button" aria-label="Reset image crop" title="Reset image crop" onClick={onResetCrop} disabled={busy}><Icon name="rotate" size={16} /></button>
         </div>
-      </section>
+      </details>
 
       <p className="image-inspector-note">Moving or deleting an image covers the area it came from. Page content behind an image cannot be reconstructed automatically — use Redact for confidential content.</p>
     </div>

@@ -1818,8 +1818,8 @@ input:checked + .slider-round:before { transform: translateX(16px); }
 .confirm-panel-bulk .confirm-message { max-width: 100%; margin-top: 18px; font-size: 15px; line-height: 1.55; }
 .confirm-panel-bulk .confirm-actions { gap: 10px; margin-top: 24px; }
 .confirm-panel-bulk .confirm-btn { min-height: 44px; gap: 8px; padding: 0 14px; border-radius: 10px; font-size: 14px; }
-.confirm-panel-bulk .confirm-btn-icon { width: 40px; height: 40px; border-radius: 10px; }
-.confirm-panel-bulk .confirm-btn kbd { margin-left: 8px; padding: 7px 12px; border-radius: 8px; font-size: 17px; }
+.confirm-panel-bulk .confirm-btn-icon { width: 24px; height: 24px; border-radius: 10px; }
+.confirm-panel-bulk .confirm-btn kbd { margin-left: 8px; padding: 3px 5px; border-radius: 4px; font-size: 11px; }
 @media (max-width: 620px) {
   .confirm-panel-bulk { min-height: 0; padding: 26px; border-radius: 20px; }
   .confirm-panel-bulk .confirm-title { font-size: 28px; }
@@ -3302,14 +3302,23 @@ input:checked + .slider-round:before { transform: translateX(16px); }
  * Candidates stay dashed; the selected image keeps the solid accent border. */
 .pdf-image-object.is-candidate { border-style: dashed; border-color: color-mix(in srgb, var(--accent, #426ef5) 90%, transparent); background: color-mix(in srgb, var(--accent, #426ef5) 7%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #426ef5) 25%, transparent); }
 .pdf-image-object.is-candidate:hover { border-color: var(--accent, #426ef5); background: color-mix(in srgb, var(--accent, #426ef5) 12%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #426ef5) 40%, transparent); }
-.image-inspector { display: grid; gap: 14px; max-height: 100%; overflow: auto; padding-right: 2px; }
-.image-inspector-section { display: grid; gap: 8px; }
-.image-inspector-section h3 { margin: 0; color: var(--text); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
-.image-inspector-grid { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.image-inspector-field { display: grid; gap: 3px; color: var(--text-dim); font-size: 11px; }
-.image-inspector-field input[type="number"] { width: 88px; color: var(--text); font: inherit; }
+.image-inspector { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-height: 100%; overflow: auto; padding: 2px 3px 8px 0; }
+.image-inspector-section { display: grid; gap: 9px; min-width: 0; padding: 0 10px 10px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--panel) 88%, var(--text) 2%); }
+.image-inspector-section summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; cursor: pointer; list-style: none; color: var(--text); font-size: 12px; font-weight: 650; }
+.image-inspector-section summary::-webkit-details-marker { display: none; }
+.image-inspector-section summary::after { content: '⌄'; color: var(--text-dim); transition: transform .18s ease; }
+.image-inspector-section[open] summary::after { transform: rotate(180deg); }
+.image-inspector-section summary small { margin-left: auto; color: var(--text-dim); font-size: 10px; font-weight: 450; }
+.image-inspector-section summary:focus-visible, .image-inspector button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.image-inspector-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; }
+.image-inspector-grid > .image-inspector-note { grid-column: 1 / -1; }
+.image-inspector-grid .editor-open-button { min-height: 34px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; }
+.image-inspector-field { display: grid; gap: 4px; min-width: 0; color: var(--text-dim); font-size: 11px; }
+.image-inspector-field input[type="number"] { box-sizing: border-box; width: 100%; min-width: 0; color: var(--text); font: inherit; }
 .image-inspector-field input[type="checkbox"] { justify-self: start; accent-color: var(--accent, #426ef5); }
-.image-inspector-note { margin: 0; max-width: 320px; color: var(--text-dim); font-size: 11px; line-height: 1.45; }
+.image-inspector-note { margin: 0; max-width: 320px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+.image-crop-field { grid-column: 1 / -1; display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--text-dim); font-size: 11px; }
+.image-crop-field input { width: 100%; accent-color: var(--accent); }
 .full-pdf-editor-mode .image-inspector-grid .editor-open-button { font-size: 11px; }
 /* Empty image state: selecting an outlined image is the primary action. */
 .image-inspector-empty { gap: 10px; }
