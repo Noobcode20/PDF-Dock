@@ -354,11 +354,9 @@ ipcMain.handle('pdfking:switch-window', (event, direction = 1) => {
 })
 
 ipcMain.handle('pdfking:open-pdf', async () => {
-  const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'PDF documents', extensions: ['pdf'] }] })
-  if (result.canceled || !result.filePaths[0]) return null
-  const filePath = result.filePaths[0]
-  const data = await fs.readFile(filePath)
-  return { name: path.basename(filePath), data, filePath }
+  const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF documents', extensions: ['pdf'] }] })
+  if (result.canceled || !result.filePaths.length) return []
+  return Promise.all(result.filePaths.map(async (filePath) => ({ name: path.basename(filePath), data: await fs.readFile(filePath), filePath })))
 })
 ipcMain.handle('pdfking:renderer-ready', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender)

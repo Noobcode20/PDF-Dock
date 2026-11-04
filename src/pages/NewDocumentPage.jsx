@@ -109,7 +109,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
       setError('')
       try {
         const selected = await window.pdfKing.openPdf()
-        if (selected) { const file = new File([selected.data], selected.name, { type: 'application/pdf' }); file.sourcePath = selected.filePath; importFile(file) }
+        for (const item of selected || []) { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; importFile(file) }
       } catch (cause) {
         setError(cause?.message || 'Could not open that PDF.')
       } finally {
