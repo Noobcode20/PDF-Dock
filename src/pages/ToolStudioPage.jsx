@@ -1282,7 +1282,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
       const writtenSession={...sessionRef.current}
       let writeFile=currentFile
       if(sessionRef.current.password){const {encryptEditorPdf}=await import('../pdfEngine');writeFile=await encryptEditorPdf(currentFile,sessionRef.current.password)}
-      const result=await writeEditorDocument({file:writeFile,session:writtenSession,mode,bridge:window.pdfKing,download:output=>saveOutput(output,{recordRecent:false}),recordRecent:record=>window.localStorage.getItem('pdfking-keep-recent')!=='false'&&recentFilesBackend()?.addRecentFile?.(record)})
+      const result=await writeEditorDocument({file:writeFile,session:writtenSession,mode,bridge:window.pdfKing,download:output=>saveOutput(output,{recordRecent:false}),recordRecent:record=>recentFilesBackend()?.addRecentFile?.(record)})
       if(!result)return false
       if(sessionRef.current.id!==writtenSession.id)return true
       if(result.saved){
@@ -1291,7 +1291,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
           renamed.sourcePath=result.path||writtenSession.sourcePath;setFiles([renamed]);filesRef.current=[renamed]
           currentEditSnapshot.current={...currentEditSnapshot.current,files:[renamed]}
         }
-        updateSession(sessionAfterWrite(sessionRef.current,writtenSession,result.path))
+        updateSession({...sessionAfterWrite(sessionRef.current,writtenSession,result.path),libraryId:result.libraryId||sessionRef.current.libraryId})
       }
       setMessage(`${mode==='export'?'Exported':'Saved'} ${result.name}`);return true
     }catch(cause){setError(cause.message||'Could not save PDF.');return false}finally{savingRef.current=false}

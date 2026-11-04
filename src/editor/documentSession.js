@@ -5,6 +5,7 @@ export function createDocumentSession(files = []) {
     id: newRevision(),
     originalFile: files[0] || null,
     sourcePath: files[0]?.sourcePath || null,
+    libraryId: files[0]?.libraryId || null,
     revision,
     savedRevision: revision,
     version: 0,

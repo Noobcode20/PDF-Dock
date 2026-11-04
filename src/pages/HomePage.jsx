@@ -388,7 +388,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
       if (!backend?.readRecentFile) throw new Error('This PDF could not be opened because local file storage is unavailable.')
       const data = await backend.readRecentFile(record.id)
       if (!data) throw new Error('The selected recent PDF could not be read.')
-      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath=record.sourcePath
+      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath=record.sourcePath; file.libraryId=record.id
       onNavigate({ type: 'tool', toolId: 'pdf-editor', files: [file] })
     } catch (cause) { setError(cause.message || 'Could not open this recent PDF.') }
   }
@@ -402,6 +402,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
       if (!data) throw new Error(`Could not read ${record.name}.`)
       const file = new File([data], record.name, { type: 'application/pdf' })
       file.sourcePath = record.sourcePath
+      file.libraryId = record.id
       return file
     }))
     return result

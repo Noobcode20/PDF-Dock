@@ -94,7 +94,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     try {
       const data = await backend.readRecentFile(record.id)
       if (!data) throw new Error(`Could not read ${record.name}.`)
-      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath = record.sourcePath; importFile(file)
+      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath = record.sourcePath; file.libraryId = record.id; importFile(file)
     } catch (cause) {
       setError(cause?.message || `Could not open ${record.name}.`)
     } finally {
