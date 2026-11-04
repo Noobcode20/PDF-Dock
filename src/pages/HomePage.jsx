@@ -241,6 +241,7 @@ function ConfirmDialog({ isOpen, onClose, fileName, bulkCount = 0, onDelete }) {
 }
 
 export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
+  const homePicker = useRef(null)
   const [files, setFiles] = useState([])
   const [error, setError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -580,6 +581,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
       setActiveFileId(null)
       setSelectedFiles((current) => current.size ? new Set() : current)
     }}>
+      <input ref={homePicker} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) onOpenPdf?.(files) }} />
       <section className="welcome-row home-hero" style={{ alignItems: 'flex-start', minHeight: 'auto', paddingTop: 24 }}>
         <div>
           <div className="home-breadcrumb"><span>WORKSPACE</span><span>/</span><strong>PDF LIBRARY</strong></div>

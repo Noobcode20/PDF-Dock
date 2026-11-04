@@ -630,6 +630,32 @@ function App() {
     })
   }
 
+  const handleOpenHomePdfs = (files) => {
+    const pdfs = Array.from(files || []).filter((file) => file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name || ''))
+    if (!pdfs.length) return
+    pdfs.forEach((file) => { if (!file.sourcePath && window.pdfKing?.getFilePath) file.sourcePath = window.pdfKing.getFilePath(file) || null })
+    const first = pdfs[0]
+    requestLeave(activeTabIdRef.current, () => {
+      handleNavigateNow({ type: 'tool', toolId: 'pdf-editor', files: [first] })
+      for (const file of pdfs.slice(1)) {
+        createTabNow()
+        handleNavigateNow({ type: 'tool', toolId: 'pdf-editor', files: [file] })
+      }
+    })
+  }
+
+  const handleOpenHomePdfPicker = async (browserFiles) => {
+    if (browserFiles?.length) { handleOpenHomePdfs(browserFiles); return }
+    if (window.pdfKing?.openPdf) {
+      try {
+        const selected = await window.pdfKing.openPdf()
+        handleOpenHomePdfs((selected || []).map((item) => { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; return file }))
+      } catch (error) { console.error('Could not open selected PDFs:', error) }
+      return
+    }
+    handleOpenPdf()
+  }
+
   useEffect(() => {
     if (!window.pdfKing?.onOpenFile || !window.pdfKing?.readOpenedPdf) return
     return window.pdfKing.onOpenFile((filePath) => {
@@ -1009,7 +1035,7 @@ function App() {
         />
 
         {currentView.type === 'home' && (
-          <HomePage userName={userName} theme={theme} onNavigate={handleNavigate} onOpenPdf={handleOpenPdf} />
+          <HomePage userName={userName} theme={theme} onNavigate={handleNavigate} onOpenPdf={handleOpenHomePdfPicker} />
         )}
 
         {currentView.type === 'category' && (
