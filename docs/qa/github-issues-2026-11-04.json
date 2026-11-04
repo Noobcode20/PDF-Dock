@@ -1,0 +1,162 @@
+[
+  {
+    "body": "## Bug report\n\nThe undo and redo buttons don't do anything. I am unsure if this is the same for everything, but I was editing and tried pressing the undo buttons, but it wasn't working.\n\n### App context\n\nPDF Editor \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 24,
+    "state": "OPEN",
+    "title": "Bug report: Undo and Redo Issue",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/24"
+  },
+  {
+    "body": "## Bug report\n\nThe side panel for the image editing pane looks very ugly. It is very hard to interact with and it isn't intuitive. Redesign it so that it looks better. There are a lot of things just scattered throughout the pane and it is very hard to interact with or understand what is going on easily. Replace as many things as possible with icons, use up all the available horizontal space, while also making sure everything isn't crapped. Add sections, that can be collapsed for easy storage of tools in the side pane.\n\n### App context\n\nPDF Editor \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 23,
+    "state": "OPEN",
+    "title": "Bug report: Ugly Side Panel",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/23"
+  },
+  {
+    "body": "## Bug report\n\nWhen I try to edit an image, The image behind it isn't being remove properly. There is like a triangle cutout that is appearing, but that is it. the image is still staying there.\n\n### App context\n\nPDF Editor \u00b7 PDF page 1\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 22,
+    "state": "OPEN",
+    "title": "Bug report: Image Processing Error",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/22"
+  },
+  {
+    "body": "## Bug report\n\nWhen I go to add a pdf, it is asking if I want to open an exisiting pdf. That doesn't make sense. It should open the file explorer and allow me to add new pdf. I shouldn't need 2 button interactions for it to get to that state. I also want to be able to add as many pdfs as I want.\n\n### App context\n\nHome \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 21,
+    "state": "OPEN",
+    "title": "Bug report: Logic Issue for Add PDF",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/21"
+  },
+  {
+    "body": "## Bug report\n\nI tried deleting some files, and the popup for it is massive. It isn't the proper size\n\n### App context\n\nHome \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 20,
+    "state": "OPEN",
+    "title": "Bug report: Large Popup",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/20"
+  },
+  {
+    "body": "## Bug report\n\nI don'e touch the image and it is being auto selected. It should only become selected when I click on it\n\n### App context\n\nPDF Editor \u00b7 PDF page 1\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 19,
+    "state": "OPEN",
+    "title": "Bug report: Image is auto selecting",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/19"
+  },
+  {
+    "body": "## Bug report\n\nI want to be able to save to the app, without saving to my machine. it should store all of the changes, under the same name. The option to export should still be there\n\n### App context\n\nPDF Editor \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 18,
+    "state": "OPEN",
+    "title": "Bug report: PDF Saving",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/18"
+  },
+  {
+    "body": "## Bug report\n\nWhen a pdf is merged, compressed, etc. the naming is automatically generated and cannot be changed, it should be the user's choice about weather or not they want it saved in the app, and what the name should be. It shouldn't be auto generated. there should be more options(not on the main screen, throughout the page) about where it should go. I might want to save locally and not in the app, or in the app and not locally, or both. it should allow the user to have all of the options\n\n### App context\n\nMerge PDF \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 17,
+    "state": "OPEN",
+    "title": "Bug report: PDF Storage",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/17"
+  },
+  {
+    "body": "## Bug report\n\nThe confetti shouldn't appear everytime something is successful in the app. it doesn't look good\n\n### App context\n\nMerge PDF \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.6 (darwin).",
+    "labels": [],
+    "number": 16,
+    "state": "OPEN",
+    "title": "Bug report: confetti",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/16"
+  },
+  {
+    "body": "## Bug report\n\nThe whole thing looks messed up when the screen width is shrunk\n\n### App context\n\nPDF Editor \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 14,
+    "state": "OPEN",
+    "title": "Bug report: Item reposition Error",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/14"
+  },
+  {
+    "body": "## Bug report\n\nin a field where \"Name:\" was bolded, it got unbolded when I tried to edit the text, it got unboldened, even through the original text was bolded, but, with the rest of the name being unbolded\n\n### App context\n\nPDF Editor \u00b7 PDF page\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 13,
+    "state": "OPEN",
+    "title": "Bug report: Text Unbolding Issue",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/13"
+  },
+  {
+    "body": "## Bug report\n\nI tried opening a pdf I compress and scrolling down, but it is bugging out. It is stuck between two pages and keep flickering between the pages. and won't allow me to scroll down\n\n### App context\n\nCompress PDF \u00b7 PDF page\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 12,
+    "state": "OPEN",
+    "title": "Bug report: Preview Issue",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/12"
+  },
+  {
+    "body": "## Bug report\n\nThe save file button icon isn't visible\n\n### App context\n\nMerge PDF \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 10,
+    "state": "OPEN",
+    "title": "Bug report: Icon issue",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/10"
+  },
+  {
+    "body": "## Bug report\n\nAfter a merge, the PDF that is generated should have the option to add a name and whether or not the user wants to save it to the app.\n\n### App context\n\nMerge PDF \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 9,
+    "state": "OPEN",
+    "title": "Bug report: PDF Naming",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/9"
+  },
+  {
+    "body": "## Bug report\n\nThe files are appearing as green in the actual page, when they should be appearing as green in the file selector view.\n\n### App context\n\nMerge PDF \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 8,
+    "state": "OPEN",
+    "title": "Bug report: Coloring error",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/8"
+  },
+  {
+    "body": "## Bug report\n\nThe icon for add file isn't visible and the button isn't centered\n\n### App context\n\nMerge PDF \u00b7 Workspace\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 7,
+    "state": "OPEN",
+    "title": "Bug report: Add file errors",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/7"
+  },
+  {
+    "body": "## Bug report\n\nI tried to morph an image and nothing would happen\n\n### App context\n\nPDF Editor \u00b7 PDF page\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 6,
+    "state": "OPEN",
+    "title": "Bug report: Image Edit Doesn't work",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/6"
+  },
+  {
+    "body": "## Bug report\n\nI am unable to delete a textbox, without editing it.\n\n### Expected behavior\n\nI tried to delete a text box by left click and select delete, but nothing would happen.\n\n### App context\n\nPDF Editor \u00b7 PDF page\n\n---\nReported from PDF Dock 0.1.0-beta.5 (darwin).",
+    "labels": [],
+    "number": 5,
+    "state": "OPEN",
+    "title": "Bug report: Text Box Delete Not Working",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/5"
+  },
+  {
+    "body": "## Bug report\n\nThere are not a lot of shortcuts to customize. There should be more shortcuts in the app and they should be available to customize in settings\n\n### App context\n\nSettings \u00b7 Settings panel\n\n---\nReported from PDF Dock 0.1.0-beta.2 (darwin).",
+    "labels": [],
+    "number": 3,
+    "state": "OPEN",
+    "title": "Bug report: Shortcut Customizability",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/3"
+  },
+  {
+    "body": "<img width=\"1373\" height=\"182\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/e2188136-d774-4bd9-861f-f1cfcf3d1405\" />\n\n\nRemoving text while editing a PDF leaves behind text remains, as if the text had been painted over instead of being actually removed. This happened even after I had downloaded the pdf and opened it again in another app.",
+    "labels": [],
+    "number": 2,
+    "state": "OPEN",
+    "title": "Editing text in the app doesn't remove the text.",
+    "url": "https://github.com/Noobcode20/PDF-Dock/issues/2"
+  }
+]
