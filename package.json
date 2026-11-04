@@ -15,7 +15,7 @@
     "check": "npm run build",
     "package:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64 --publish never",
     "package:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "test": "node scripts/test-output-storage.mjs && node scripts/test-editor-library-save.mjs && node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-simple-text-safety.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-keyboard-shortcuts.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs && node scripts/test-updater.mjs && node scripts/test-render-budget.mjs && node scripts/test-select-mode-regressions.cjs",
+    "test": "node scripts/test-output-storage.mjs && node scripts/test-text-input-history.mjs && node scripts/test-editor-library-save.mjs && node scripts/test-editor.mjs && node scripts/test-rich-text.mjs && node scripts/test-simple-text-safety.mjs && node scripts/test-recent-files.mjs && node scripts/test-pdf-to-word.mjs && node scripts/test-pdf-compression.mjs && node scripts/test-page-numbers.mjs && node scripts/test-keyboard-shortcuts.mjs && node scripts/test-image-editing.mjs && node scripts/test-image-regressions.mjs && npm run test:repairs && node scripts/test-updater.mjs && node scripts/test-render-budget.mjs && node scripts/test-select-mode-regressions.cjs",
     "test:repairs": "node scripts/create-editor-fixtures.mjs && node scripts/create-sol-fixtures.mjs && node scripts/test-sol-repairs.mjs && node scripts/test-renderer-origin.cjs"
   },
   "dependencies": {

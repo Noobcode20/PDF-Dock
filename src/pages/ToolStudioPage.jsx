@@ -1076,7 +1076,21 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     updateSession(nextSession)
     applyEditSnapshot({ ...snapshot, revision: nextSession.revision })
   }
+  const [textInputHistory, setTextInputHistory] = useState({ active: false, undo: false, redo: false })
+  useEffect(() => {
+    const receive = event => setTextInputHistory(event.detail)
+    window.addEventListener('pdfdock:text-history-state', receive)
+    return () => window.removeEventListener('pdfdock:text-history-state', receive)
+  }, [])
+  const restoreActiveText = direction => {
+    const input = document.querySelector('.pdf-text-edit-input')
+    if (!input) return false
+    input.dispatchEvent(new CustomEvent('pdfdock:text-history', { detail: { direction } }))
+    return true
+  }
   const undoEdit = () => {
+    if (restoreActiveText('undo')) return
+    formTyping.current = { name: null, at: 0 }
     const { past, future } = editHistory
     if (!past.length) return
     cropSession.current.key = null
@@ -1087,6 +1101,8 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
     applyEditSnapshot(previous)
   }
   const redoEdit = () => {
+    if (restoreActiveText('redo')) return
+    formTyping.current = { name: null, at: 0 }
     const { past, future } = editHistory
     if (!future.length) return
     cropSession.current.key = null
@@ -1595,8 +1611,8 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
         <div className="pdf-editor-command-quick-actions" aria-label="Document actions">
           <button type="button" aria-label="Properties" title="Properties" disabled={!file || busy} onClick={() => setShowProperties(true)}>Properties</button>
           <span />
-          <button type="button" aria-label="Undo" title="Undo PDF edit" disabled={busy || !editHistory.past.length} onClick={undoEdit}>Undo</button>
-          <button type="button" aria-label="Redo" title="Redo PDF edit" disabled={busy || !editHistory.future.length} onClick={redoEdit}>Redo</button>
+          <button type="button" aria-label="Undo" title="Undo PDF edit" data-editor-history disabled={busy || (textInputHistory.active ? !textInputHistory.undo : !editHistory.past.length)} onMouseDown={event => event.preventDefault()} onClick={undoEdit}>Undo</button>
+          <button type="button" aria-label="Redo" title="Redo PDF edit" data-editor-history disabled={busy || (textInputHistory.active ? !textInputHistory.redo : !editHistory.future.length)} onMouseDown={event => event.preventDefault()} onClick={redoEdit}>Redo</button>
         </div>
         <div className={`pdf-editor-nav-search ${editorSearchExpanded ? 'is-expanded' : ''}`}>
           <button type="button" aria-label={editorSearchExpanded ? 'Collapse PDF search' : 'Search PDF'} onClick={toggleEditorSearch}>Search</button>
@@ -3450,7 +3466,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     const handleOutsidePointerDown = (event) => {
       const target = event.target
       if (!(target instanceof Element)) return
-      if (textInput.current?.contains(target) || target.closest('.pdf-text-format-ribbon, .text-style-control, .text-style-toggle, .pdf-text-box-resize, .pdf-text-highlight-controls')) return
+      if (textInput.current?.contains(target) || target.closest('[data-editor-history], .pdf-text-format-ribbon, .text-style-control, .text-style-toggle, .pdf-text-box-resize, .pdf-text-highlight-controls')) return
       if (document.activeElement === textInput.current) textInput.current.blur()
       else commitTextEdit()
     }

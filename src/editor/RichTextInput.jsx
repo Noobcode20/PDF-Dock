@@ -1,5 +1,7 @@
 import React, { useLayoutEffect, useEffect, useRef } from 'react'
 import { rebaseTextStyleRanges, textStyleAt } from './textStyles.js'
+import { createTextInputHistory, recordTextInput, restoreTextInput } from './textInputHistory.js'
+import { loadShortcuts, matchesShortcut } from '../keyboardShortcuts'
 
 export function readTextSelection(root) {
   const selection = window.getSelection()
@@ -28,8 +30,33 @@ function restoreSelection(root, start, end) {
 }
 
 export const RichTextInput = React.forwardRef(function RichTextInput({ edit, preserveSourceLayout, displayWidth, displayHeight, pageHeight, onEdit, onFit, onSelection, onKeyDown, ...props }, forwardedRef) {
+  const history = useRef(createTextInputHistory(edit))
+  const replaying = useRef(false)
   const root = useRef(null), composing = useRef(false), latest = useRef({ edit, onEdit, onSelection })
   latest.current = { edit, onEdit, onFit, onSelection }
+  const announceHistory = () => window.dispatchEvent(new CustomEvent('pdfdock:text-history-state', { detail: { active: true, undo: history.current.past.length > 0, redo: history.current.future.length > 0 } }))
+  const restoreHistory = direction => {
+    const restored = restoreTextInput(history.current, direction)
+    if (restored === history.current) return
+    history.current = restored
+    replaying.current = true
+    latest.current.onEdit(restored.present)
+    announceHistory()
+  }
+  useLayoutEffect(() => {
+    if (replaying.current) replaying.current = false
+    else history.current = recordTextInput(history.current, edit)
+    announceHistory()
+  }, [edit])
+  useEffect(() => {
+    const node = root.current
+    const handle = event => { event.stopPropagation(); restoreHistory(event.detail.direction) }
+    node.addEventListener('pdfdock:text-history', handle)
+    return () => {
+      node.removeEventListener('pdfdock:text-history', handle)
+      window.dispatchEvent(new CustomEvent('pdfdock:text-history-state', { detail: { active: false, undo: false, redo: false } }))
+    }
+  }, [])
   const select = () => {
     const selection = readTextSelection(root.current)
     if (selection) latest.current.onSelection(selection)
@@ -123,6 +150,12 @@ export const RichTextInput = React.forwardRef(function RichTextInput({ edit, pre
     onEdit({ ...edit, value, ...(value !== edit.oldText ? { sourceLineCount: 0, sourceLayout: [] } : {}), styleRanges: rebaseTextStyleRanges(edit.styleRanges, edit.value, value, edit.typingStyle), ...selection })
   }
   return <div {...props} ref={element => { root.current = element; if (typeof forwardedRef === 'function') forwardedRef(element); else if (forwardedRef) forwardedRef.current = element }} role="textbox" aria-multiline="true" contentEditable suppressContentEditableWarning onFocus={() => { const current = latest.current.edit; if (current.selectionStart != null) restoreSelection(root.current, current.selectionStart, current.selectionEnd ?? current.selectionStart) }} onInput={input} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false; input() }} onPaste={event => { event.preventDefault(); document.execCommand('insertText', false, event.clipboardData.getData('text/plain')) }} onKeyDown={event => {
+    const shortcuts = loadShortcuts()
+    const isMac = window.pdfKing?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform || '')
+    const redo = matchesShortcut(event, shortcuts.redo, isMac) || (event.ctrlKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'y')
+    if (!event.nativeEvent.isComposing && (redo || matchesShortcut(event, shortcuts.undo, isMac))) {
+      event.preventDefault(); event.stopPropagation(); restoreHistory(redo ? 'redo' : 'undo'); return
+    }
     onKeyDown?.(event)
     if (!event.defaultPrevented && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); document.execCommand('insertText', false, '\n') }
   }} />
