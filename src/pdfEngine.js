@@ -1948,7 +1948,9 @@ export async function inspectPdfPageImages(file, pageNumber, rotation = 0) {
     else if (imageOps.has(operation)) {
       const combined = multiply(viewport.transform, transform)
       const capture = captureImagePlacement(combined, Number(args[1]) || 0, Number(args[2]) || 0)
-      const corners = [point(combined, 0, 0), point(combined, 1, 0), point(combined, 0, 1), point(combined, 1, 1)]
+      // Keep points in perimeter order. The old order crossed the diagonals
+      // when this quad was used to cover the source artwork in the PDF.
+      const corners = [point(combined, 0, 0), point(combined, 1, 0), point(combined, 1, 1), point(combined, 0, 1)]
       const left = Math.max(0, Math.min(...corners.map((corner) => corner.x)))
       const top = Math.max(0, Math.min(...corners.map((corner) => corner.y)))
       const right = Math.min(viewport.width, Math.max(...corners.map((corner) => corner.x)))

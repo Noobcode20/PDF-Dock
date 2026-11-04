@@ -205,6 +205,31 @@ await check(
   },
 );
 
+await check("replacing a skewed source covers the full perimeter instead of a crossed triangle", async () => {
+  const base = await buildBasePdf();
+  const pdf = await PDFDocument.load(base);
+  const page = pdf.getPage(0);
+  const replacement = buildSolidPng("#00FFFF");
+  // PDF.js image corners originate in matrix unit-square order. The quad is
+  // deliberately skewed to expose a diagonal-crossing polygon path.
+  const originalQuad = [
+    { x: .1, y: .7 }, { x: .5, y: .72 },
+    { x: .46, y: .3 }, { x: .14, y: .28 },
+  ];
+  const output = await applyOperations(base, [baseEdit({
+    isNew: false, x: .12, y: .3, width: .35, height: .4,
+    original: { x: .1, y: .28, width: .4, height: .44 }, originalQuad,
+    sourceData: replacement, sourceWidth: 40, sourceHeight: 40,
+    replacementData: replacement, replacementType: "image/png",
+  })]);
+  const rendered = await render(output);
+  // The quad interior is covered by replacement (cyan); samples near all four
+  // perimeter corners catch the old crossed path leaving source magenta.
+  for (const [x, y] of [[75, 250], [280, 250], [270, 550], [90, 550]]) {
+    assert.ok(near(pixelAt(rendered, x, y), [0, 255, 255], 70), `unexpected pixel at ${x},${y}`);
+  }
+});
+
 await check(
   "the viewer rotation is not baked into the orientation of the saved image",
   async () => {
