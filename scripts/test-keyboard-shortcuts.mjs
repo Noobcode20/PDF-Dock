@@ -53,4 +53,5 @@ assert.deepEqual(loadShortcuts()['print-document'], target);
 saveShortcuts(DEFAULT_SHORTCUTS);
 assert.equal(store.get('pdfking-shortcuts'), '{}');
 assert.equal(shortcutSignature({ key: '' }, false), '');
+assert.equal(SHORTCUT_ACTIONS.length, 30, 'settings should expose the supported app and editor actions');
 console.log(`PASS keyboard shortcuts: ${SHORTCUT_ACTIONS.length} labelled actions, unique defaults, platform-aware matching, conflict replacement, persistence.`);

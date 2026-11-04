@@ -34,7 +34,6 @@ import { allTools } from '../toolsData'
 import { forgetPdfCopy, rememberPdf, saveOutput } from '../fileServices'
 import { recentFilesBackend } from '../recentFiles'
 import { Presence } from '../components/Presence'
-import { ConfettiCelebration } from '../components/ConfettiCelebration'
 import { loadShortcuts, matchesShortcut } from '../keyboardShortcuts'
 
 const renderFileIds = new WeakMap()
@@ -199,7 +198,6 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
   const [message, setMessage] = useState(() => restoredDraft?.message || '')
   const [error, setError] = useState(() => restoredDraft?.error || '')
   const [outputs, setOutputs] = useState(() => restoredDraft?.outputs || [])
-  const [celebrationId, setCelebrationId] = useState(0)
   const [preview, setPreview] = useState(null)
   const previewUrl = useRef(null)
   const savingRef = useRef(false)
@@ -528,7 +526,6 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
       if (controller.signal.aborted || jobInputs.current.files !== source.files || jobInputs.current.toolId !== source.toolId || jobInputs.current.options !== source.options) {setProgress(null);setMessage('Inputs changed during processing. Run the tool again.');return []}
       const nextOutputs = result.outputs || []
       setOutputs(nextOutputs)
-      if (nextOutputs.length) setCelebrationId((id) => id + 1)
       onDirtyChange(nextOutputs.length > 0 || (toolId === 'redact-pdf' && redactMarked))
       setMessage(result.message || `${nextOutputs.length} output file${nextOutputs.length === 1 ? '' : 's'} ready.`)
       setProgress(null)
@@ -686,7 +683,6 @@ export function ToolStudioPage({ toolId, initialFiles = EMPTY_FILES, initialDraf
 
   return (
     <>
-    <ConfettiCelebration active={celebrationId > 0} key={celebrationId} />
     <div className={`page-content tool-studio-page ${tool.category === 'organize' ? 'organize-tool-page' : ''} ${tool.id === 'merge-pdf' ? 'merge-tool-page' : ''}`}>
       <div className="studio-header">
         <span className={`tool-icon ${tool.tone} studio-main-icon`}><Icon name={tool.icon} size={25} /></span>
