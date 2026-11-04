@@ -75,6 +75,15 @@ try {
   assert.equal(updated.length, 24);
   assert.equal(updated[0].name, "renamed.pdf");
   assert.equal(updated[0].missing, true);
+  const libraryId = updated[0].id;
+  // Equal-size edits must replace cached bytes, not silently reuse the old PDF.
+  await call("add-recent-file", { name: "renamed.pdf", data: new Uint8Array([37, 80, 68, 70, 77]), libraryId });
+  assert.deepEqual([...await call("read-recent-file", libraryId)], [37, 80, 68, 70, 77]);
+  await call("add-recent-file", { name: "renamed.pdf", data: new Uint8Array([37, 80, 68, 70, 88]), libraryId });
+  assert.equal((await call("get-recent-files")).length, 24);
+  assert.deepEqual([...await call("read-recent-file", libraryId)], [37, 80, 68, 70, 88]);
+  assert.equal((await call("get-recent-files"))[0].sourcePath, null);
+  await assert.rejects(call("add-recent-file", { name: "bad.pdf", data: new Uint8Array([1]), libraryId: "../escape" }), /Invalid library/);
   await call("remove-recent-file", updated[0].id);
   assert.equal((await call("get-recent-files")).length, 23);
   assert.throws(

@@ -48,7 +48,7 @@ async function rememberPdfOnce(file, backend) {
     const { PDFDocument } = await import('pdf-lib')
     pages = (await PDFDocument.load(data, { ignoreEncryption: true })).getPageCount()
   } catch { /* Keep history for damaged files too. */ }
-  try { await backend.addRecentFile({ name: file.name, data, size: file.size, pages, sourcePath: file.sourcePath || null }) }
+  try { const entry = await backend.addRecentFile({ name: file.name, data, size: file.size, pages, sourcePath: file.sourcePath || null, libraryId: file.libraryId || null }); if (entry?.id) file.libraryId = entry.id; return entry }
   catch (error) { console.warn('The PDF could not be added to recent files.', error) }
 }
 

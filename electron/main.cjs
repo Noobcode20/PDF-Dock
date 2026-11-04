@@ -457,7 +457,7 @@ ipcMain.handle('pdfking:add-recent-file', async (_event, { name, data, pages, so
   const cachedPath = path.join(recentDirectory(), `${id}.pdf`)
   try {
     const existing = await fs.stat(cachedPath)
-    if (stablePath || existing.size !== bytes.byteLength) await atomicWrite(cachedPath, bytes)
+    if (libraryId || stablePath || existing.size !== bytes.byteLength) await atomicWrite(cachedPath, bytes)
   } catch { await atomicWrite(cachedPath, bytes) }
   const previous = await readRecentIndex()
   const entries = previous.filter((entry) => entry.id !== id)

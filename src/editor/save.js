@@ -11,7 +11,7 @@ export async function writeEditorDocument({
   if (!file) throw new Error("Open a PDF first.");
   const data = new Uint8Array(await file.arrayBuffer());
   let path = null;
-  let libraryId = session.libraryId || null;
+  let libraryId = session.libraryId || session.originalFile?.libraryId || file.libraryId || null;
   if (mode === "library") {
     if (typeof recordRecent !== 'function') throw new Error('The local PDF library is unavailable.');
     const entry = await recordRecent({ name: file.name, data, libraryId, sourcePath: null });

@@ -59,3 +59,12 @@ Review the current app and all GitHub reports, fix verified defects, improve con
 
 ## Remaining work
 All lanes, independent review, integrated verification, and push.
+
+## Real-document validation requirement (user correction)
+Use actual app-library PDFs with real text, images, mixed fonts and multi-page layouts. Generated fixtures only isolate regressions; they do not establish actual document usability. Copies of five genuine library documents are under ignored `tmp/real-pdf-qa/`, with source hashes in a local manifest. Never modify originals or commit their content or screenshots. Record exact interactions and reopened output checks, including failures.
+
+## Integration review findings
+- Initial agent patches did not fully handle direct Home import, stable library saves, write errors or active text history. Parent is correcting these gaps.
+- Image quad extraction used diagonal-crossing corner order; corrected before real-document verification.
+- Active text history implemented and verified in actual Electron against a generated fixture; real-document checks still pending.
+- Compressed mixed-size 60-page fixture scrolling and narrow rendered layouts passed; real-document validation still pending.

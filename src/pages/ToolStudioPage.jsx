@@ -1288,7 +1288,7 @@ export function PdfEditorWorkspace({ initialFiles = EMPTY_FILES, initialDraft, o
       if(result.saved){
         if(filesRef.current[0]===currentFile && sessionRef.current.revision===writtenSession.revision){
           const renamed=result.name===currentFile.name?currentFile:new File([currentFile],result.name,{type:'application/pdf'})
-          renamed.sourcePath=result.path||writtenSession.sourcePath;setFiles([renamed]);filesRef.current=[renamed]
+          renamed.libraryId=result.libraryId||writtenSession.libraryId;renamed.sourcePath=result.path||writtenSession.sourcePath;setFiles([renamed]);filesRef.current=[renamed]
           currentEditSnapshot.current={...currentEditSnapshot.current,files:[renamed]}
         }
         updateSession({...sessionAfterWrite(sessionRef.current,writtenSession,result.path),libraryId:result.libraryId||sessionRef.current.libraryId})

@@ -72,8 +72,10 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     }
   }
 
-  const importFile = (file) => {
-    if (!file) return
+  const importFile = (incoming) => {
+    const files = Array.isArray(incoming) ? incoming : incoming ? [incoming] : []
+    if (!files.length) return
+    const file = files[0]
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
       setError('Choose a PDF file. Convert images and Office documents with the Convert tools.')
       return
@@ -82,7 +84,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     setBusy(false)
     setError('')
     onClose()
-    onNavigate({ type: 'tool', toolId: 'pdf-editor', files: [file] })
+    onNavigate({ type: 'tool', toolId: 'pdf-editor', files })
   }
 
   const openRecent = async (record) => {
@@ -109,7 +111,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
       setError('')
       try {
         const selected = await window.pdfKing.openPdf()
-        for (const item of selected || []) { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; importFile(file) }
+        importFile((selected || []).map(item => { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; return file }))
       } catch (cause) {
         setError(cause?.message || 'Could not open that PDF.')
       } finally {

@@ -476,6 +476,7 @@ function App() {
   }
 
   const handleNavigate = (view) => {
+    if (view.type === 'tool' && view.toolId === 'pdf-editor' && view.files?.length > 1) { void handleOpenHomePdfs(view.files); return }
     if (view.type === 'category' && view.categoryId === 'edit' && currentView.type === 'tool' && currentView.toolId === 'pdf-editor') {
       handleOpenPdf()
       return
@@ -630,10 +631,17 @@ function App() {
     })
   }
 
-  const handleOpenHomePdfs = (files) => {
+  const handleOpenHomePdfs = async (files) => {
     const pdfs = Array.from(files || []).filter((file) => file?.type === 'application/pdf' || /\.pdf$/i.test(file?.name || ''))
     if (!pdfs.length) return
     pdfs.forEach((file) => { if (!file.sourcePath && window.pdfKing?.getFilePath) file.sourcePath = window.pdfKing.getFilePath(file) || null })
+    const backend = recentFilesBackend()
+    if (!backend?.addRecentFile) throw new Error('The PDF library is unavailable.')
+    for (const file of pdfs) {
+      const entry = await backend.addRecentFile({ name: file.name, data: new Uint8Array(await file.arrayBuffer()), size: file.size, sourcePath: file.sourcePath || null, libraryId: file.libraryId || null })
+      if (!entry?.id) throw new Error(`Could not add ${file.name} to the library.`)
+      file.libraryId = entry.id
+    }
     const first = pdfs[0]
     requestLeave(activeTabIdRef.current, () => {
       handleNavigateNow({ type: 'tool', toolId: 'pdf-editor', files: [first] })
@@ -645,13 +653,12 @@ function App() {
   }
 
   const handleOpenHomePdfPicker = async (browserFiles) => {
-    if (browserFiles?.length) { handleOpenHomePdfs(browserFiles); return }
+    if (browserFiles?.length) return handleOpenHomePdfs(browserFiles)
     if (window.pdfKing?.openPdf) {
-      try {
+      {
         const selected = await window.pdfKing.openPdf()
-        handleOpenHomePdfs((selected || []).map((item) => { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; return file }))
-      } catch (error) { console.error('Could not open selected PDFs:', error) }
-      return
+        return handleOpenHomePdfs((selected || []).map((item) => { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; return file }))
+      }
     }
     handleOpenPdf()
   }

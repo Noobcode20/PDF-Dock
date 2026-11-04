@@ -566,13 +566,19 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
     deleteFile()
   }
 
+  const openHomeFiles = async (incoming) => {
+    try { setError(''); await onOpenPdf?.(incoming) }
+    catch (cause) { setError(cause?.message || 'Could not add the selected PDFs. Files already added remain in your library.'); window.dispatchEvent(new Event('pdfking:recent-files-changed')) }
+  }
+  const browseHomeFiles = () => window.pdfKing?.openPdf ? void openHomeFiles() : homePicker.current?.click()
+
   const handleDroppedFiles = (fileList) => {
     const incoming = Array.from(fileList || [])
     const pdfs = incoming.filter((file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name))
     if (!pdfs.length) { setError('Drop one or more PDF files to open them here.'); return }
     if (pdfs.length !== incoming.length) setError('Only PDF files were added; other file types were skipped.')
     else setError('')
-    onNavigate({ type: 'tool', toolId: 'pdf-editor', files: pdfs })
+    void openHomeFiles(pdfs)
   }
 
   return (
@@ -581,7 +587,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
       setActiveFileId(null)
       setSelectedFiles((current) => current.size ? new Set() : current)
     }}>
-      <input ref={homePicker} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) onOpenPdf?.(files) }} />
+      <input ref={homePicker} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) void openHomeFiles(files) }} />
       <section className="welcome-row home-hero" style={{ alignItems: 'flex-start', minHeight: 'auto', paddingTop: 24 }}>
         <div>
           <div className="home-breadcrumb"><span>WORKSPACE</span><span>/</span><strong>PDF LIBRARY</strong></div>
@@ -631,7 +637,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         </div>
       )}
       </div>
-      <DocumentPreview record={files.find((file) => file.id === activeFileId) || null} page={previewPage} expanded={previewMode} onOpenPreview={() => setPreviewMode(true)} onClosePreview={() => { setPreviewMode(false); setPreviewPage(1) }} onNavigatePage={(direction) => setPreviewPage((current) => Math.max(1, current + direction))} onPageCountChange={handlePreviewPageCount} selectedCount={selectedFiles.size} onRemoveSelected={() => showRemoveSelectedConfirm([...selectedFiles])} onOpenPdf={onOpenPdf} onOpenSelected={() => { const record = files.find((file) => file.id === [...selectedFiles][0]); if (record) void open(record) }} onRunFileAction={runSelectedTool} onPrintSelected={printSelected} onFilesDropped={handleDroppedFiles} />
+      <DocumentPreview record={files.find((file) => file.id === activeFileId) || null} page={previewPage} expanded={previewMode} onOpenPreview={() => setPreviewMode(true)} onClosePreview={() => { setPreviewMode(false); setPreviewPage(1) }} onNavigatePage={(direction) => setPreviewPage((current) => Math.max(1, current + direction))} onPageCountChange={handlePreviewPageCount} selectedCount={selectedFiles.size} onRemoveSelected={() => showRemoveSelectedConfirm([...selectedFiles])} onOpenPdf={browseHomeFiles} onOpenSelected={() => { const record = files.find((file) => file.id === [...selectedFiles][0]); if (record) void open(record) }} onRunFileAction={runSelectedTool} onPrintSelected={printSelected} onFilesDropped={handleDroppedFiles} />
       </div>
       <Presence present={selectionNotice} exitDuration={180}>
         <div className="file-open-hint" role="status">Selected — double-click to open this PDF</div>
