@@ -492,7 +492,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         const sidebar = document.querySelector('.sidebar')
         if (sidebar) sidebar.focus()
       } else if (event.key === 'Tab') {
-        if (!previewMode) { event.preventDefault(); setPreviewMode(true); setPreviewPage(1) }
+        if (activeFileId && event.target?.closest?.('.home-file-row') && !previewMode) { event.preventDefault(); setPreviewMode(true); setPreviewPage(1) }
       }
     }
     window.addEventListener('keydown', handleHomeShortcut)
