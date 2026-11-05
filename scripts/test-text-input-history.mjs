@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict'
+import { createTextInputHistory, recordTextInput, restoreTextInput } from '../src/editor/textInputHistory.js'
+const original = { value: 'Name: Person', styleRanges: [{ start: 0, end: 5, fontWeight: '700' }], selectionStart: 6 }
+let history = createTextInputHistory(original)
+history = recordTextInput(history, { ...original, selectionStart: 8 })
+assert.equal(history.past.length, 0, 'Moving the caret must not create undo steps')
+history = recordTextInput(history, { ...original, value: 'Name: Pat', selectionStart: 9 })
+history = restoreTextInput(history, 'undo')
+assert.equal(history.present.value, original.value)
+assert.deepEqual(history.present.styleRanges, original.styleRanges)
+history = restoreTextInput(history, 'redo')
+assert.equal(history.present.value, 'Name: Pat')
+history = restoreTextInput(history, 'undo')
+history = recordTextInput(history, { ...original, color: '#ff0000' })
+assert.equal(history.future.length, 0, 'Formatting after Undo invalidates Redo')
+history = restoreTextInput(history, 'undo')
+assert.equal(history.present.color, undefined)
+for (let i = 0; i < 150; i++) history = recordTextInput(history, { ...original, value: String(i) })
+assert.equal(history.past.length, 100, 'Typing history must remain bounded')
+console.log('PASS active text history: selection, text, style restoration, branching, and bounded memory.')

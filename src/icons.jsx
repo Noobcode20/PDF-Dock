@@ -1,6 +1,9 @@
 import React from 'react'
 
 export const paths = {
+  alignLeft: <><path d="M4 5h16M4 10h10M4 15h16M4 20h10"/></>,
+  alignCenter: <><path d="M4 5h16M7 10h10M4 15h16M7 20h10"/></>,
+  alignRight: <><path d="M4 5h16M10 10h10M4 15h16M10 20h10"/></>,
   home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-7h6v7"/></>,
   sidebar: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
   star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/>,
@@ -19,6 +22,9 @@ export const paths = {
   expand: <><path d="M9 9 4 4m0 5V4h5m6 5 5-5m-5 0h5v5M9 15l-5 5m5 0H4v-5m11 5 5-5m0 5v-5h-5"/></>,
   pen: <><path d="m4 20 4.5-1 10-10a2.8 2.8 0 0 0-4-4l-10 10L4 20Z"/><path d="m13 7 4 4"/></>,
   signature: <><path d="M4 15c2.5-1 4-9 6-9 2 0-1 8-1 10 0 2 2 1 4-1 1 3 3 3 7 0"/><path d="M4 20h16"/></>,
+  flipHorizontal: <><path d="M12 3v18M3 7l6 5-6 5V7ZM21 7l-6 5 6 5V7Z"/></>,
+  flipVertical: <><path d="M3 12h18M7 3l5 6 5-6H7ZM7 21l5-6 5 6H7Z"/></>,
+  straighten: <><path d="M4 15h16M6 6l12 4M12 3v5M9 20h6"/></>,
   crop: <><path d="M6 3v13a2 2 0 0 0 2 2h13M18 21V8a2 2 0 0 0-2-2H3"/></>,
   extract: <><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 18v3h14v-3"/></>,
   copy: <><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,

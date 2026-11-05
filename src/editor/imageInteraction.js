@@ -26,3 +26,15 @@ export function imageDoubleClickPlan({ sourceLoaded = false, capturePending = fa
     captureSource: !sourceLoaded && !capturePending,
   };
 }
+
+/** Decoding source pixels is not a new selection action. A late result must
+ * not reselect a deselected image or overwrite a newer transform. */
+export function mergeImageSource(current, decoded) {
+  if (!current || current.page !== decoded.page || current.key !== decoded.key) return current;
+  return {
+    ...current,
+    sourceData: current.sourceData || decoded.sourceData,
+    sourceWidth: current.sourceWidth || decoded.sourceWidth,
+    sourceHeight: current.sourceHeight || decoded.sourceHeight,
+  };
+}

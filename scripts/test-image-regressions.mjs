@@ -23,7 +23,7 @@ import { PDFDocument } from "pdf-lib";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { applyOperations } from "../src/editor/operations.js";
 import { reframeRegion } from "../src/editor/coordinates.js";
-import { imageDoubleClickPlan } from "../src/editor/imageInteraction.js";
+import { imageDoubleClickPlan, mergeImageSource } from "../src/editor/imageInteraction.js";
 
 const PAGE_WIDTH = 600;
 const PAGE_HEIGHT = 800;
@@ -160,6 +160,17 @@ const baseEdit = (extra) => ({
 
 console.log("image editor regressions");
 
+await check("late image decoding cannot reselect an image or replace a newer transform", async () => {
+  const decoded = { page: 2, key: "image-a", sourceData: new Uint8Array([1, 2]), sourceWidth: 20, rotation: 0 };
+  assert.equal(mergeImageSource(null, decoded), null);
+  const other = { page: 3, key: "image-a" };
+  assert.equal(mergeImageSource(other, decoded), other);
+  const changed = { page: 2, key: "image-a", rotation: 90, x: .7 };
+  const merged = mergeImageSource(changed, decoded);
+  assert.equal(merged.rotation, 90); assert.equal(merged.x, .7);
+  assert.deepEqual(merged.sourceData, decoded.sourceData);
+});
+
 await check(
   "a viewer rotation of 0 and of 90 save the same image in the same place",
   async () => {
@@ -204,6 +215,31 @@ await check(
     assert.equal(differing, 0, "the viewer rotation changed the saved image");
   },
 );
+
+await check("replacing a skewed source covers the full perimeter instead of a crossed triangle", async () => {
+  const base = await buildBasePdf();
+  const pdf = await PDFDocument.load(base);
+  const page = pdf.getPage(0);
+  const replacement = buildSolidPng("#00FFFF");
+  // PDF.js image corners originate in matrix unit-square order. The quad is
+  // deliberately skewed to expose a diagonal-crossing polygon path.
+  const originalQuad = [
+    { x: .1, y: .7 }, { x: .5, y: .72 },
+    { x: .46, y: .3 }, { x: .14, y: .28 },
+  ];
+  const output = await applyOperations(base, [baseEdit({
+    isNew: false, x: .12, y: .3, width: .35, height: .4,
+    original: { x: .1, y: .28, width: .4, height: .44 }, originalQuad,
+    sourceData: replacement, sourceWidth: 40, sourceHeight: 40,
+    replacementData: replacement, replacementType: "image/png",
+  })]);
+  const rendered = await render(output);
+  // The quad interior is covered by replacement (cyan); samples near all four
+  // perimeter corners catch the old crossed path leaving source magenta.
+  for (const [x, y] of [[75, 250], [280, 250], [270, 550], [90, 550]]) {
+    assert.ok(near(pixelAt(rendered, x, y), [0, 255, 255], 70), `unexpected pixel at ${x},${y}`);
+  }
+});
 
 await check(
   "the viewer rotation is not baked into the orientation of the saved image",

@@ -125,20 +125,21 @@ async function trimLibrary() {
   await finished
 }
 
-export async function addRecentFile({ name, data, pages, sourcePath } = {}) {
+export async function addRecentFile({ name, data, pages, sourcePath, libraryId } = {}) {
   if (typeof name !== 'string' || !/\.pdf$/i.test(name)) return null
   const bytes = toBytes(data)
   if (!bytes.byteLength) throw new Error('This PDF has no content to store.')
   if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('This PDF is larger than the browser limit for stored recent files.')
-  const id = await recentFileId(bytes)
+  if (libraryId != null && (typeof libraryId !== 'string' || !/^[\w-]{1,100}$/.test(libraryId))) throw new Error('Invalid library file ID.')
+  const id = libraryId || await recentFileId(bytes)
   const now = Date.now()
   const previous = await readMetadata(id)
   const entry = {
     id,
     name: name.replace(/[\\/:*?"<>|]/g, '_'),
     size: bytes.byteLength,
-    pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : 0,
-    sourcePath: typeof sourcePath === 'string' && sourcePath ? sourcePath : null,
+    pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : (previous?.pages || 0),
+    sourcePath: libraryId ? null : (typeof sourcePath === 'string' && sourcePath ? sourcePath : null),
     modified: new Date(now).toISOString(),
     modifiedAt: now,
     addedAt: previous?.addedAt ?? now,

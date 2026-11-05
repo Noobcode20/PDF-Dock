@@ -354,11 +354,9 @@ ipcMain.handle('pdfking:switch-window', (event, direction = 1) => {
 })
 
 ipcMain.handle('pdfking:open-pdf', async () => {
-  const result = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'PDF documents', extensions: ['pdf'] }] })
-  if (result.canceled || !result.filePaths[0]) return null
-  const filePath = result.filePaths[0]
-  const data = await fs.readFile(filePath)
-  return { name: path.basename(filePath), data, filePath }
+  const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF documents', extensions: ['pdf'] }] })
+  if (result.canceled || !result.filePaths.length) return []
+  return Promise.all(result.filePaths.map(async (filePath) => ({ name: path.basename(filePath), data: await fs.readFile(filePath), filePath })))
 })
 ipcMain.handle('pdfking:renderer-ready', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender)
@@ -447,22 +445,23 @@ ipcMain.handle('pdfking:cli-result', async (_event, result) => {
   }
 })
 
-ipcMain.handle('pdfking:add-recent-file', async (_event, { name, data, pages, sourcePath }) => serializeRecentUpdate(async () => {
+ipcMain.handle('pdfking:add-recent-file', async (_event, { name, data, pages, sourcePath, libraryId }) => serializeRecentUpdate(async () => {
   if (typeof name !== 'string' || !/\.pdf$/i.test(name)) return null
   await fs.mkdir(recentDirectory(), { recursive: true })
   const bytes = Buffer.from(data)
   if (bytes.byteLength > 1024 * 1024 * 1024) throw new Error('This PDF is larger than the 1 GB recent-file cache limit.')
-  const stablePath = typeof sourcePath === 'string' && path.isAbsolute(sourcePath) ? path.normalize(sourcePath) : null
-  const id = crypto.createHash('sha256').update(stablePath ? (process.platform === 'win32' ? stablePath.toLowerCase() : stablePath) : bytes).digest('hex').slice(0, 40)
+  if (libraryId != null && (typeof libraryId !== 'string' || !/^[\w-]{1,100}$/.test(libraryId))) throw new Error('Invalid library file ID.')
+  const stablePath = libraryId ? null : typeof sourcePath === 'string' && path.isAbsolute(sourcePath) ? path.normalize(sourcePath) : null
+  const id = libraryId || crypto.createHash('sha256').update(stablePath ? (process.platform === 'win32' ? stablePath.toLowerCase() : stablePath) : bytes).digest('hex').slice(0, 40)
   const safeName = name.replace(/[\\/:*?"<>|]/g, '_')
   const cachedPath = path.join(recentDirectory(), `${id}.pdf`)
   try {
     const existing = await fs.stat(cachedPath)
-    if (stablePath || existing.size !== bytes.byteLength) await atomicWrite(cachedPath, bytes)
+    if (libraryId || stablePath || existing.size !== bytes.byteLength) await atomicWrite(cachedPath, bytes)
   } catch { await atomicWrite(cachedPath, bytes) }
   const previous = await readRecentIndex()
   const entries = previous.filter((entry) => entry.id !== id)
-  entries.unshift({ id, sourcePath: stablePath, name: safeName, size: bytes.byteLength, pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : 0, modified: new Date().toISOString() })
+  entries.unshift({ id, sourcePath: stablePath, name: safeName, size: bytes.byteLength, pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : (previous.find(entry => entry.id === id)?.pages || 0), modified: new Date().toISOString() })
   const maxBytes = 1024 * 1024 * 1024
   let totalBytes = 0
   const trimmed = []
@@ -481,7 +480,7 @@ ipcMain.handle('pdfking:read-recent-file', async (_event, id) => serializeRecent
   if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) throw new Error('Invalid recent file.')
   const entries=await readRecentIndex(),entry=entries.find(entry=>entry.id===id)
   let data
-  try {data=await fs.readFile(entry?.sourcePath || path.join(recentDirectory(), `${id}.pdf`))} catch(error) {if(error.code==='ENOENT')throw new Error('This file has moved or is missing. Remove it from Recent Files or open its new location.');throw error}
+  try {data=await fs.readFile(path.join(recentDirectory(), `${id}.pdf`))} catch(error) {if(error.code==='ENOENT')throw new Error('This file has moved or is missing. Remove it from Recent Files or open its new location.');throw error}
   if(entry){entry.modified=new Date().toISOString();await writeRecentIndex([entry,...entries.filter(e=>e.id!==id)])}
   return data
 }))

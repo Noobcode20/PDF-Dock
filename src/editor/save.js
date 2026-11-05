@@ -11,7 +11,13 @@ export async function writeEditorDocument({
   if (!file) throw new Error("Open a PDF first.");
   const data = new Uint8Array(await file.arrayBuffer());
   let path = null;
-  if (bridge?.saveFile) {
+  let libraryId = session.libraryId || session.originalFile?.libraryId || file.libraryId || null;
+  if (mode === "library") {
+    if (typeof recordRecent !== 'function') throw new Error('The local PDF library is unavailable.');
+    const entry = await recordRecent({ name: file.name, data, libraryId, sourcePath: null });
+    if (!entry?.id) throw new Error('The PDF could not be saved to the local library.');
+    libraryId = entry.id;
+  } else if (bridge?.saveFile) {
     const result = await bridge.saveFile({
       name: file.name,
       data,
@@ -19,8 +25,8 @@ export async function writeEditorDocument({
     });
     if (result.canceled) return null;
     path = result.filePath;
-  } else await download({ name: file.name, data, mimeType: "application/pdf" });
-  try {
+  } else if (mode !== "library") await download({ name: file.name, data, mimeType: "application/pdf" });
+  if (mode !== 'library') try {
     await recordRecent?.({
       ...file,
       name: path?.split(/[\\/]/).pop() || file.name,
@@ -32,6 +38,7 @@ export async function writeEditorDocument({
   }
   return {
     path,
+    libraryId,
     name: path?.split(/[\\/]/).pop() || file.name,
     saved: mode !== "export",
   };

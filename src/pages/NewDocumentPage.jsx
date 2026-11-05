@@ -72,8 +72,10 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     }
   }
 
-  const importFile = (file) => {
-    if (!file) return
+  const importFile = (incoming) => {
+    const files = Array.isArray(incoming) ? incoming : incoming ? [incoming] : []
+    if (!files.length) return
+    const file = files[0]
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
       setError('Choose a PDF file. Convert images and Office documents with the Convert tools.')
       return
@@ -82,7 +84,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     setBusy(false)
     setError('')
     onClose()
-    onNavigate({ type: 'tool', toolId: 'pdf-editor', files: [file] })
+    onNavigate({ type: 'tool', toolId: 'pdf-editor', files })
   }
 
   const openRecent = async (record) => {
@@ -94,7 +96,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
     try {
       const data = await backend.readRecentFile(record.id)
       if (!data) throw new Error(`Could not read ${record.name}.`)
-      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath = record.sourcePath; importFile(file)
+      const file = new File([data], record.name, { type: 'application/pdf' }); file.sourcePath = record.sourcePath; file.libraryId = record.id; importFile(file)
     } catch (cause) {
       setError(cause?.message || `Could not open ${record.name}.`)
     } finally {
@@ -109,7 +111,7 @@ export function NewDocumentPage({ isOpen = true, mode = 'new', onNavigate, onClo
       setError('')
       try {
         const selected = await window.pdfKing.openPdf()
-        if (selected) { const file = new File([selected.data], selected.name, { type: 'application/pdf' }); file.sourcePath = selected.filePath; importFile(file) }
+        importFile((selected || []).map(item => { const file = new File([item.data], item.name, { type: 'application/pdf' }); file.sourcePath = item.filePath; return file }))
       } catch (cause) {
         setError(cause?.message || 'Could not open that PDF.')
       } finally {

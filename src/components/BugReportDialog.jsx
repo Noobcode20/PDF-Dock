@@ -41,14 +41,6 @@ export function BugReportDialog({ context, onClose }) {
     finally { setBusy(false) }
   }
 
-  const confettiPieces = Array.from({ length: 28 }, (_, index) => ({
-    '--confetti-x': `${((index * 37) % 96) + 2}%`,
-    '--confetti-delay': `${(index % 7) * 45}ms`,
-    '--confetti-duration': `${1050 + (index % 5) * 140}ms`,
-    '--confetti-rotate': `${(index * 67) % 360}deg`,
-    '--confetti-color': ['#82aaff', '#8dd9bd', '#f4c66a', '#f28b82', '#c6a6f7'][index % 5],
-  }))
-
   return <Presence present exitDuration={160}><div className="bug-report-backdrop" onClick={onClose}>
     <section className="bug-report-dialog" role="dialog" aria-modal="true" aria-labelledby="bug-report-title" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() } }}>
       <header className="bug-report-header">
@@ -56,7 +48,6 @@ export function BugReportDialog({ context, onClose }) {
         <button type="button" className="palette-close-btn" aria-label="Close bug report" onClick={onClose}>×</button>
       </header>
       {issueUrl ? <div className="bug-report-success" role="status" aria-live="polite">
-        <div className="bug-report-confetti" aria-hidden="true">{confettiPieces.map((style, index) => <i key={index} style={style} />)}</div>
         <span className="bug-report-success-icon"><Icon name="check" size={24} /></span>
         <div className="bug-report-success-copy">
           <h2>Report submitted</h2>
