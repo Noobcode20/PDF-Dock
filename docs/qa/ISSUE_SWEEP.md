@@ -48,9 +48,10 @@ Review all GitHub reports, preserve existing work and user data, fix confirmed d
 - Real Electron workflows: bold-label editing and resizing, property dropdown focus, text-box deletion, typing/document undo/redo, source-text extraction, embedded diagram selection/rotation/deletion, exported source-area pixels, save/reload/reopen, direct multi-import, compact delete confirmation, output names/destinations/cancellation, actual compression, long-document scrolling, and 1280/760/390px layouts.
 - Details and reproducible commands: `REAL_DOCUMENT_VERIFICATION.md`.
 
-## Remaining gates
-- Final combined real-document run after the last integration changes.
-- Final review, commit, push and issue-linked PR.
+## Delivery status
+- Final production build, full Node suite, focused output/cache checks and combined real-document Electron run passed.
+- Parent completed final diff review and committed the integrated redesign and fixes.
+- Branch push and issue-linked PR publication are in progress.
 - Windows installed-app execution and installer/update distribution are not validated by the macOS runtime checks. No installer release is part of this sweep.
 
 ## Known limits
