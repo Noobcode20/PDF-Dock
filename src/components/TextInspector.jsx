@@ -1,17 +1,17 @@
 import React from 'react'
+import { FontSizeInput } from './FontSizeInput'
 import { ThemedSelect } from './ThemedSelect'
 import { InspectorSection, InspectorAction } from './InspectorSection'
 
 export function TextInspector({ style, setStyle, fonts, localFonts, onFontChange, isAdding }) {
   const update = patch => setStyle(current => ({ ...current, ...patch }))
   const fontOptions = [...(!fonts.includes(style.fontFamily) && !style.localFontId ? [{ value: style.fontFamily, label: style.fontFamily }] : []), ...fonts.map(font => ({ value: font, label: font })), ...localFonts.map(font => ({ value: `local:${font.id}`, label: `${font.name} · local` }))]
-  const sizes = [...new Set([style.fontSize, 8, 10, 12, 14, 16, 18, 24, 32, 48])].sort((a,b) => a-b)
   return <div className="property-inspector text-inspector">
     <InspectorSection title="Typography">
       <label className="inspector-field inspector-field-wide text-style-control"><span>Font family</span><ThemedSelect ariaLabel="Font family" value={style.localFontId ? `local:${style.localFontId}` : style.fontFamily} onChange={event => void onFontChange(event.target.value)} options={fontOptions} /></label>
       <div className="inspector-field-pair">
         <label className="inspector-field text-style-control"><span>Weight</span><ThemedSelect ariaLabel="Font weight" value={style.bold ? '700' : '400'} onChange={event => update({ bold: event.target.value === '700' })} options={[{ value: '400', label: 'Regular' }, { value: '700', label: 'Bold' }]} /></label>
-        <label className="inspector-field text-style-control"><span>Size</span><ThemedSelect ariaLabel="Font size" value={style.fontSize} onChange={event => update({ fontSize: Number(event.target.value) })} options={sizes.map(size => ({ value: size, label: `${size} pt` }))} /></label>
+        <label className="inspector-field text-style-control"><span>Size</span><FontSizeInput value={style.fontSize} onChange={fontSize => update({ fontSize })} /></label>
       </div>
       <div className="inspector-field-pair">
         <label className="inspector-field text-style-control"><span>Line height</span><ThemedSelect ariaLabel="Line height" value={style.lineHeight || 1.2} onChange={event => update({ lineHeight: Number(event.target.value) })} options={[1,1.15,1.2,1.5,2].map(value => ({ value, label: `${Math.round(value*100)}%` }))} /></label>

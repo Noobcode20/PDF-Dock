@@ -1,6 +1,7 @@
 import { PasswordDialog } from './editor/PasswordDialog'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
+import { tabbable } from 'tabbable'
 import '@fontsource/outfit/latin-400.css'
 import '@fontsource/outfit/latin-500.css'
 import '@fontsource/outfit/latin-600.css'
@@ -848,7 +849,7 @@ function App() {
 
   useEffect(() => {
     const topDialog = () => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter((el) => el.getClientRects().length).at(-1)
-    const focusables = () => [...(topDialog()?.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]') || [])].filter((el) => el.getClientRects().length)
+    const focusables = () => { const dialog = topDialog(); return dialog ? tabbable(dialog) : [] }
     const captureReturnFocus = (event) => {
       const menu = event.target?.closest?.('[data-select-trigger]')
       const trigger = menu && document.getElementById(menu.dataset.selectTrigger)

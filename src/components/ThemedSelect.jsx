@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../icons'
+import { tabbable } from 'tabbable'
 
 const THEME_PROPERTIES = ['--bg', '--panel', '--panel-hover', '--border', '--text', '--text-dim', '--muted', '--accent', '--accent-soft', '--accent-border', '--accent-contrast', '--focus-ring']
 
@@ -107,8 +108,7 @@ export function ThemedSelect({ value, options = [], onChange, className = '', st
       const trigger = triggerRef.current
       const dialog = trigger?.closest('[role="dialog"], [role="alertdialog"]')
       const scope = dialog || document.body
-      const controls = [...scope.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')]
-        .filter(node => node.tabIndex >= 0 && node.getClientRects().length && !menuRef.current?.contains(node))
+      const controls = tabbable(scope).filter(node => !menuRef.current?.contains(node))
       const index = controls.indexOf(trigger)
       let nextIndex = index + (event.shiftKey ? -1 : 1)
       if (dialog && controls.length) nextIndex = (nextIndex + controls.length) % controls.length

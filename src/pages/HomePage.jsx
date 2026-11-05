@@ -492,12 +492,12 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         const sidebar = document.querySelector('.sidebar')
         if (sidebar) sidebar.focus()
       } else if (event.key === 'Tab') {
-        if (activeFileId && event.target?.closest?.('.home-file-row') && !previewMode) { event.preventDefault(); setPreviewMode(true); setPreviewPage(1) }
+        if (activeFileId && event.target?.matches?.('.home-file-row') && !previewMode) { event.preventDefault(); setPreviewMode(true); setPreviewPage(1) }
       }
     }
     window.addEventListener('keydown', handleHomeShortcut)
     return () => window.removeEventListener('keydown', handleHomeShortcut)
-  }, [files, previewMode, query, confirmOpen])
+  }, [files, previewMode, query, confirmOpen, activeFileId])
 
   useEffect(() => {
     const handleArrowKeys = (event) => {
