@@ -1,6 +1,9 @@
 import React from 'react'
 
 export const paths = {
+  alignLeft: <><path d="M4 5h16M4 10h10M4 15h16M4 20h10"/></>,
+  alignCenter: <><path d="M4 5h16M7 10h10M4 15h16M7 20h10"/></>,
+  alignRight: <><path d="M4 5h16M10 10h10M4 15h16M10 20h10"/></>,
   home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-7h6v7"/></>,
   sidebar: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
   star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/>,

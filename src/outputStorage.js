@@ -20,7 +20,8 @@ export async function saveToolOutput(output, { destination = 'device', exportFil
   }
   if (inApp) {
     try {
-      await library.addRecentFile({ name: output.name, data: output.data, size: output.data.byteLength, pages: output.pages || 0, sourcePath: null })
+      const entry = await library.addRecentFile({ name: output.name, data: output.data, size: output.data.byteLength, pages: output.pages || 0, sourcePath: null })
+      if (!entry?.id) throw new Error('The library did not accept this PDF.')
     } catch (cause) {
       throw new Error(`${exported ? 'Exported to your device, but saving in the app failed.' : 'Could not save in the app.'} Your output is still available. ${cause?.message || ''}`.trim())
     }

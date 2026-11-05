@@ -23,7 +23,7 @@ import { PDFDocument } from "pdf-lib";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { applyOperations } from "../src/editor/operations.js";
 import { reframeRegion } from "../src/editor/coordinates.js";
-import { imageDoubleClickPlan } from "../src/editor/imageInteraction.js";
+import { imageDoubleClickPlan, mergeImageSource } from "../src/editor/imageInteraction.js";
 
 const PAGE_WIDTH = 600;
 const PAGE_HEIGHT = 800;
@@ -159,6 +159,17 @@ const baseEdit = (extra) => ({
 });
 
 console.log("image editor regressions");
+
+await check("late image decoding cannot reselect an image or replace a newer transform", async () => {
+  const decoded = { page: 2, key: "image-a", sourceData: new Uint8Array([1, 2]), sourceWidth: 20, rotation: 0 };
+  assert.equal(mergeImageSource(null, decoded), null);
+  const other = { page: 3, key: "image-a" };
+  assert.equal(mergeImageSource(other, decoded), other);
+  const changed = { page: 2, key: "image-a", rotation: 90, x: .7 };
+  const merged = mergeImageSource(changed, decoded);
+  assert.equal(merged.rotation, 90); assert.equal(merged.x, .7);
+  assert.deepEqual(merged.sourceData, decoded.sourceData);
+});
 
 await check(
   "a viewer rotation of 0 and of 90 save the same image in the same place",

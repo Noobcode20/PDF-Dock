@@ -66,7 +66,7 @@ class AppErrorBoundary extends React.Component {
 async function serializeFiles(files) {
   return Promise.all((Array.isArray(files) ? files : []).map(async (file) => {
     if (!file || typeof file.arrayBuffer !== 'function') throw new Error('This tab contains a file that cannot be moved between windows.')
-    return { name: file.name || 'document.pdf', type: file.type || 'application/pdf', lastModified: file.lastModified || Date.now(), sourcePath:file.sourcePath||null, bytes: new Uint8Array(await file.arrayBuffer()) }
+    return { name: file.name || 'document.pdf', type: file.type || 'application/pdf', lastModified: file.lastModified || Date.now(), sourcePath:file.sourcePath||null,libraryId:file.libraryId||null, bytes: new Uint8Array(await file.arrayBuffer()) }
   }))
 }
 
@@ -85,14 +85,14 @@ function restoreTabView(payload) {
     view.files = (payload.files || []).map((file) => Object.assign(new File([file.bytes], file.name, {
       type: file.type || 'application/pdf',
       lastModified: file.lastModified || Date.now(),
-    }),{sourcePath:file.sourcePath||null}))
+    }),{sourcePath:file.sourcePath||null,libraryId:file.libraryId||null}))
   }
   return view
 }
 
 function restoreDraft(payload) {
   if (!payload) return null
-  return { ...payload, session:payload.session?{...payload.session,originalFile:payload.session.originalFile?restoreDraft({files:[payload.session.originalFile]}).files[0]:null}:null, editHistory:{past:(payload.editHistory?.past||[]).map(snapshot=>({...snapshot,files:restoreDraft({files:snapshot.files}).files})),future:(payload.editHistory?.future||[]).map(snapshot=>({...snapshot,files:restoreDraft({files:snapshot.files}).files}))}, files: (payload.files || []).map((file) => Object.assign(new File([file.bytes], file.name, { type: file.type || 'application/pdf', lastModified: file.lastModified || Date.now() }),{sourcePath:file.sourcePath||null})) }
+  return { ...payload, session:payload.session?{...payload.session,originalFile:payload.session.originalFile?restoreDraft({files:[payload.session.originalFile]}).files[0]:null}:null, editHistory:{past:(payload.editHistory?.past||[]).map(snapshot=>({...snapshot,files:restoreDraft({files:snapshot.files}).files})),future:(payload.editHistory?.future||[]).map(snapshot=>({...snapshot,files:restoreDraft({files:snapshot.files}).files}))}, files: (payload.files || []).map((file) => Object.assign(new File([file.bytes], file.name, { type: file.type || 'application/pdf', lastModified: file.lastModified || Date.now() }),{sourcePath:file.sourcePath||null,libraryId:file.libraryId||null})) }
 }
 
 function UnsavedChangesDialog({ onDismiss, stage = 'file', error, onAccept, onCancel }) {
@@ -637,8 +637,12 @@ function App() {
     pdfs.forEach((file) => { if (!file.sourcePath && window.pdfKing?.getFilePath) file.sourcePath = window.pdfKing.getFilePath(file) || null })
     const backend = recentFilesBackend()
     if (!backend?.addRecentFile) throw new Error('The PDF library is unavailable.')
+    const { PDFDocument } = await import('pdf-lib')
     for (const file of pdfs) {
-      const entry = await backend.addRecentFile({ name: file.name, data: new Uint8Array(await file.arrayBuffer()), size: file.size, sourcePath: file.sourcePath || null, libraryId: file.libraryId || null })
+      const data = new Uint8Array(await file.arrayBuffer())
+      let pages = 0
+      try { pages = (await PDFDocument.load(data, { ignoreEncryption: true })).getPageCount() } catch { /* Opening the editor provides the detailed read error. */ }
+      const entry = await backend.addRecentFile({ name: file.name, data, pages, size: file.size, sourcePath: file.sourcePath || null, libraryId: file.libraryId || null })
       if (!entry?.id) throw new Error(`Could not add ${file.name} to the library.`)
       file.libraryId = entry.id
     }

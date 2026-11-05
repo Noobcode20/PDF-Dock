@@ -461,7 +461,7 @@ ipcMain.handle('pdfking:add-recent-file', async (_event, { name, data, pages, so
   } catch { await atomicWrite(cachedPath, bytes) }
   const previous = await readRecentIndex()
   const entries = previous.filter((entry) => entry.id !== id)
-  entries.unshift({ id, sourcePath: stablePath, name: safeName, size: bytes.byteLength, pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : 0, modified: new Date().toISOString() })
+  entries.unshift({ id, sourcePath: stablePath, name: safeName, size: bytes.byteLength, pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : (previous.find(entry => entry.id === id)?.pages || 0), modified: new Date().toISOString() })
   const maxBytes = 1024 * 1024 * 1024
   let totalBytes = 0
   const trimmed = []

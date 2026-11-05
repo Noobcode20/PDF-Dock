@@ -19,8 +19,8 @@ export function OutputSaveControls({ output, onSave, onPreview, onSettingsChange
     } catch (cause) { setError(cause.message) }
     finally { setSaving(false) }
   }}>
-    <label>File name<input value={name} disabled={saving} onChange={event => onSettingsChange({ saveName: event.target.value })} required /></label>
-    <label>Save to<select value={destination} disabled={saving} onChange={event => onSettingsChange({ saveDestination: event.target.value })}>
+    <label>File name<input aria-label="File name" value={name} disabled={saving} onChange={event => onSettingsChange({ saveName: event.target.value })} required /></label>
+    <label>Save to<select aria-label="Save to" value={destination} disabled={saving} onChange={event => onSettingsChange({ saveDestination: event.target.value })}>
       <option value="device">My device</option>
       {pdf && <option value="app">PDF Dock library</option>}
       {pdf && <option value="both">Library and my device</option>}

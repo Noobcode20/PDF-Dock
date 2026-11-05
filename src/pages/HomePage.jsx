@@ -242,6 +242,7 @@ function ConfirmDialog({ isOpen, onClose, fileName, bulkCount = 0, onDelete }) {
 
 export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
   const homePicker = useRef(null)
+  const [importing, setImporting] = useState(false)
   const [files, setFiles] = useState([])
   const [error, setError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -567,8 +568,11 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
   }
 
   const openHomeFiles = async (incoming) => {
+    if (importing) return
+    setImporting(true)
     try { setError(''); await onOpenPdf?.(incoming) }
-    catch (cause) { setError(cause?.message || 'Could not add the selected PDFs. Files already added remain in your library.'); window.dispatchEvent(new Event('pdfking:recent-files-changed')) }
+    catch (cause) { setError(cause?.message || 'Could not add the selected PDFs. Files already added remain in your library.'); void refresh() }
+    finally { setImporting(false) }
   }
   const browseHomeFiles = () => window.pdfKing?.openPdf ? void openHomeFiles() : homePicker.current?.click()
 
@@ -600,6 +604,7 @@ export function HomePage({ userName = 'User', theme, onNavigate, onOpenPdf }) {
         <div className="category-header home-documents-heading">
           <div><h1>Recent files</h1><span className="home-file-count">{files.length} {files.length === 1 ? 'document' : 'documents'}</span></div>
         </div>
+        <button className="browse-button home-add-pdfs" type="button" disabled={importing} onClick={browseHomeFiles}><Icon name="plus" size={16} />{importing ? 'Adding PDFs…' : 'Add PDFs'}</button>
         <label className="home-search"><Icon name="search" size={16} /><input type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your PDFs..." aria-label="Search recent PDFs" aria-controls="home-file-list" /></label>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}

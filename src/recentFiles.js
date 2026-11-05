@@ -138,7 +138,7 @@ export async function addRecentFile({ name, data, pages, sourcePath, libraryId }
     id,
     name: name.replace(/[\\/:*?"<>|]/g, '_'),
     size: bytes.byteLength,
-    pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : 0,
+    pages: Number.isInteger(Number(pages)) ? Math.max(0, Number(pages)) : (previous?.pages || 0),
     sourcePath: libraryId ? null : (typeof sourcePath === 'string' && sourcePath ? sourcePath : null),
     modified: new Date(now).toISOString(),
     modifiedAt: now,

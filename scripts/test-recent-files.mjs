@@ -83,6 +83,7 @@ try {
   assert.equal((await call("get-recent-files")).length, 24);
   assert.deepEqual([...await call("read-recent-file", libraryId)], [37, 80, 68, 70, 88]);
   assert.equal((await call("get-recent-files"))[0].sourcePath, null);
+  assert.equal((await call("get-recent-files"))[0].pages, 3, "Library saves preserve known page count");
   await assert.rejects(call("add-recent-file", { name: "bad.pdf", data: new Uint8Array([1]), libraryId: "../escape" }), /Invalid library/);
   await call("remove-recent-file", updated[0].id);
   assert.equal((await call("get-recent-files")).length, 23);
