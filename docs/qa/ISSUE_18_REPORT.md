@@ -1,3 +1,5 @@
+> Historical lane checkpoint. The integrated implementation and final parent verification are recorded in [ISSUE_SWEEP.md](ISSUE_SWEEP.md) and [REAL_DOCUMENT_VERIFICATION.md](REAL_DOCUMENT_VERIFICATION.md).
+
 # Issue #18 implementation report
 
 Editor Save now stores the current PDF bytes through the app's recent/library backend and records the same filename and source association. It does not invoke Electron's file save dialog or browser download. Save as and the explicit export flow still use the file save dialog. The editor's successful-save revision handling remains in place, and failures still propagate without marking the session saved.

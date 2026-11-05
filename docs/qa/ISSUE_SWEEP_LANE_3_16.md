@@ -1,3 +1,5 @@
+> Historical lane checkpoint. The integrated implementation and final parent verification are recorded in [ISSUE_SWEEP.md](ISSUE_SWEEP.md) and [REAL_DOCUMENT_VERIFICATION.md](REAL_DOCUMENT_VERIFICATION.md).
+
 # Issue sweep lane: #3 and #16
 
 ## Changes

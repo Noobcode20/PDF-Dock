@@ -51,7 +51,8 @@ Review all GitHub reports, preserve existing work and user data, fix confirmed d
 ## Delivery status
 - Final production build, full Node suite, focused output/cache checks and combined real-document Electron run passed.
 - Parent completed final diff review and committed the integrated redesign and fixes.
-- Branch push and issue-linked PR publication are in progress.
+- Branch pushed; issue-linked PR: https://github.com/Noobcode20/PDF-Dock/pull/25.
+- Merge and installer publication are outside this delivery; GitHub CI status is reported on the PR.
 - Windows installed-app execution and installer/update distribution are not validated by the macOS runtime checks. No installer release is part of this sweep.
 
 ## Known limits
