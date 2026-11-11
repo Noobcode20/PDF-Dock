@@ -1,0 +1,421 @@
+{
+  "base": "3a797a07aba6ece933e66bae809fe80b952c7928",
+  "created": "2026-11-05T09:41:18.150071",
+  "issues": [
+    {
+      "id": 1,
+      "title": "Adding a valid local font fails with a Promise-cloning error",
+      "implementation_group": "desktop-setup",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ae4884c2d-8917-45cb-ac84-23d365372744"
+    },
+    {
+      "id": 2,
+      "title": "Manage fields crashes after accepting detected fields",
+      "implementation_group": "forms-annotations",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad6793eb3-cebb-4463-94a1-6d2068d86b8d"
+    },
+    {
+      "id": 3,
+      "title": "Character tracking is not written within PDF text runs",
+      "implementation_group": "text-engine",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9623bcc4-2105-495c-b457-0436260f563f"
+    },
+    {
+      "id": 4,
+      "title": "Text wrapping and alignment measure width without tracking",
+      "implementation_group": "text-engine",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9623bcc4-2105-495c-b457-0436260f563f"
+    },
+    {
+      "id": 5,
+      "title": "Opacity and line-height changes do not create text undo steps",
+      "implementation_group": "text-engine",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9623bcc4-2105-495c-b457-0436260f563f"
+    },
+    {
+      "id": 6,
+      "title": "Opacity applied to a text selection is stored but not rendered or exported",
+      "implementation_group": "text-ui",
+      "implementation": "candidate-awaiting-review",
+      "review": "blocked-provider-usage-limit",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9162b471-3c26-4c18-b6e0-eaf19328946e",
+      "commit": "1689e8ede3dcacee8bb90c6bff2b03efeb04ff76"
+    },
+    {
+      "id": 7,
+      "title": "100% and 115% line-height choices are overridden by a 120% minimum",
+      "implementation_group": "text-ui",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9162b471-3c26-4c18-b6e0-eaf19328946e"
+    },
+    {
+      "id": 8,
+      "title": "Placing a very tall or very wide image can distort its aspect ratio",
+      "implementation_group": "images-signatures",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af21251f6-4198-4a67-ad98-bdd77066edbd"
+    },
+    {
+      "id": 9,
+      "title": "Uploading the same signature file cannot reliably retry a failed attempt",
+      "implementation_group": "images-signatures",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af21251f6-4198-4a67-ad98-bdd77066edbd"
+    },
+    {
+      "id": 10,
+      "title": "Invalid suggested field names are accepted and fail only during save/apply",
+      "implementation_group": "forms-annotations",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad6793eb3-cebb-4463-94a1-6d2068d86b8d"
+    },
+    {
+      "id": 11,
+      "title": "Suggested fields can be accepted partly or entirely outside the page",
+      "implementation_group": "forms-annotations",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad6793eb3-cebb-4463-94a1-6d2068d86b8d"
+    },
+    {
+      "id": 12,
+      "title": "Single-document tools accept multiple inputs and silently process only the first",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 13,
+      "title": "Merge treats different PDFs with the same name and size as the same file",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 14,
+      "title": "Malformed bookmark lines are silently discarded when replacing an outline",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 15,
+      "title": "The PowerPoint picker offers legacy PPT although the converter rejects it",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 16,
+      "title": "The Save shortcut cannot find standalone tool output controls",
+      "implementation_group": "parent-keyboard",
+      "implementation": "committed",
+      "review": "passed",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "commit": "d436e57",
+      "review_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A16d04697-df7c-4236-ad7b-bfa3d15322ac",
+      "review_report": "docs/reviews/audit-16.md"
+    },
+    {
+      "id": 17,
+      "title": "Opening from Recent Files or the palette drops the library record identity",
+      "implementation_group": "library-storage",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad8b1acd7-b842-421e-b374-bd714d93d39e"
+    },
+    {
+      "id": 18,
+      "title": "Files explicitly saved only in the app can be silently evicted as cache",
+      "implementation_group": "library-storage",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad8b1acd7-b842-421e-b374-bd714d93d39e"
+    },
+    {
+      "id": 19,
+      "title": "Turning off recent copies immediately deletes the existing app library",
+      "implementation_group": "library-storage",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad8b1acd7-b842-421e-b374-bd714d93d39e"
+    },
+    {
+      "id": 20,
+      "title": "Tab navigation is blocked outside text-entry controls",
+      "implementation_group": "parent-keyboard",
+      "implementation": "verified-local",
+      "review": "pending-independent-recheck",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "commit": "d436e57",
+      "review_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A8b143ff3-633d-4489-953e-8db3dc26deb4",
+      "review_report": "docs/reviews/audit-20.md",
+      "verification": "docs/fixes/audit-keyboard-and-font-size.md"
+    },
+    {
+      "id": 21,
+      "title": "Tabbing out of a custom select leaves its popup open and jumps focus",
+      "implementation_group": "parent-keyboard",
+      "implementation": "verified-local",
+      "review": "pending-independent-recheck",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "commit": "d436e57",
+      "review_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A7f04e6d5-b1dd-401f-9f82-c3ebd1e736c4",
+      "review_report": "docs/reviews/audit-21.md",
+      "verification": "docs/fixes/audit-keyboard-and-font-size.md"
+    },
+    {
+      "id": 22,
+      "title": "Collapsing the sidebar drops focus to the document body",
+      "implementation_group": "parent-keyboard",
+      "implementation": "committed",
+      "review": "passed",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "commit": "d436e57",
+      "review_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad980a464-0a93-49f8-967c-d5d09241161f",
+      "review_report": "docs/reviews/audit-22.md"
+    },
+    {
+      "id": 23,
+      "title": "Onboarding GitHub connection never displays the required device code",
+      "implementation_group": "desktop-setup",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ae4884c2d-8917-45cb-ac84-23d365372744"
+    },
+    {
+      "id": 24,
+      "title": "The installed CLI launcher is not a working standalone CLI installation",
+      "implementation_group": "desktop-setup",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ae4884c2d-8917-45cb-ac84-23d365372744"
+    },
+    {
+      "id": 25,
+      "title": "A failed optional CLI install leaves onboarding completion in an inconsistent state",
+      "implementation_group": "desktop-setup",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ae4884c2d-8917-45cb-ac84-23d365372744"
+    },
+    {
+      "id": 26,
+      "title": "Keyboard-only text selection has no highlight/underline/strike commit path",
+      "implementation_group": "forms-annotations",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad6793eb3-cebb-4463-94a1-6d2068d86b8d"
+    },
+    {
+      "id": 27,
+      "title": "Form and annotation regions cannot be moved or resized from the keyboard",
+      "implementation_group": "forms-annotations",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad6793eb3-cebb-4463-94a1-6d2068d86b8d"
+    },
+    {
+      "id": 28,
+      "title": "Existing radio options require rebuilding the whole group to make corrections",
+      "implementation_group": "forms-annotations",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad6793eb3-cebb-4463-94a1-6d2068d86b8d"
+    },
+    {
+      "id": 29,
+      "title": "Shortening a Shift-selected file range keeps the old range selected",
+      "implementation_group": "library-storage",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad8b1acd7-b842-421e-b374-bd714d93d39e"
+    },
+    {
+      "id": 30,
+      "title": "Filtering should make hidden selected-file targets explicit before bulk actions",
+      "implementation_group": "library-storage",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad8b1acd7-b842-421e-b374-bd714d93d39e"
+    },
+    {
+      "id": 31,
+      "title": "The library exposes metadata columns without a way to sort them",
+      "implementation_group": "library-storage",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ad8b1acd7-b842-421e-b374-bd714d93d39e"
+    },
+    {
+      "id": 32,
+      "title": "Text size cannot be entered freely",
+      "implementation_group": "text-ui",
+      "implementation": "verified-local",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9162b471-3c26-4c18-b6e0-eaf19328946e",
+      "verification": "docs/fixes/audit-keyboard-and-font-size.md"
+    },
+    {
+      "id": 33,
+      "title": "The font-weight control reduces all weights to Regular or Bold",
+      "implementation_group": "text-ui",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9162b471-3c26-4c18-b6e0-eaf19328946e"
+    },
+    {
+      "id": 34,
+      "title": "Rich-text paste silently discards source formatting",
+      "implementation_group": "text-ui",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3A9162b471-3c26-4c18-b6e0-eaf19328946e"
+    },
+    {
+      "id": 35,
+      "title": "Blank documents have no custom page-size option",
+      "implementation_group": "desktop-setup",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Ae4884c2d-8917-45cb-ac84-23d365372744"
+    },
+    {
+      "id": 36,
+      "title": "PDF-to-image export has no page-range control",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 37,
+      "title": "Multi-output tools require saving each result separately",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 38,
+      "title": "Watermark controls cannot change text size or placement",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 39,
+      "title": "Bookmark editing cannot load/preserve an existing hierarchical outline",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    },
+    {
+      "id": 40,
+      "title": "OCR language menus do not distinguish installed packs from unavailable ones",
+      "implementation_group": "tools-conversions",
+      "implementation": "running",
+      "review": "pending",
+      "review_model_requested": "gpt-6.1-sol",
+      "review_provider": "Jovin",
+      "implementation_task": "node:delegated-task:command%3Amcp%3A6dc5691f-5e08-4b7c-abda-19583f02b0d4%3Adelegate-task%3Af89eb1c1-4894-4402-8df5-a1436a93d2f9"
+    }
+  ],
+  "review_model": "gpt-6.1-sol",
+  "review_provider_instance": "codex_fea6b922-e3c1-4748-b318-fbc35bd60134",
+  "implementation_model": "gpt-6.1-terra"
+}

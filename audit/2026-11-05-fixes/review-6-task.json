@@ -1,0 +1,28 @@
+{
+  "taskId": "node:delegated-task:command%3Amcp%3A2aa8b401-4728-42d9-8067-ac345fd3b176%3Adelegate-task%3Aee5b66d0-cb32-4190-a7d0-c891ccae0daf",
+  "childThreadId": "thread:delegated-task:command%3Amcp%3A2aa8b401-4728-42d9-8067-ac345fd3b176%3Adelegate-task%3Aee5b66d0-cb32-4190-a7d0-c891ccae0daf",
+  "link": "<t3-thread://v2/2ec2270e-11cb-4e5d-934a-456d3a1e1ce5/thread:delegated-task:command%3Amcp%3A2aa8b401-4728-42d9-8067-ac345fd3b176%3Adelegate-task%3Aee5b66d0-cb32-4190-a7d0-c891ccae0daf>",
+  "childRunId": "run:thread:thread%3Adelegated-task%3Acommand%253Amcp%253A2aa8b401-4728-42d9-8067-ac345fd3b176%253Adelegate-task%253Aee5b66d0-cb32-4190-a7d0-c891ccae0daf:ordinal:1",
+  "childNodeId": "node:delegated-task:command%3Amcp%3A2aa8b401-4728-42d9-8067-ac345fd3b176%3Adelegate-task%3Aee5b66d0-cb32-4190-a7d0-c891ccae0daf",
+  "status": "running",
+  "workState": "working",
+  "hasPendingChildRuns": false,
+  "latestTerminalRunId": null,
+  "latestTerminalStatus": null,
+  "latestTerminalSummary": null,
+  "latestTerminalResultContextTransferId": null,
+  "providerInstanceId": "codex_fea6b922-e3c1-4748-b318-fbc35bd60134",
+  "model": "gpt-6.1-sol",
+  "options": [
+    {
+      "id": "reasoningEffort",
+      "value": "high"
+    }
+  ],
+  "summary": null,
+  "resultContextTransferId": null,
+  "hasPendingQuestion": false,
+  "pendingApproval": null,
+  "waitTimedOut": false,
+  "next": "Completion wakes this thread, so end your turn. Do not wait on it or poll it."
+}

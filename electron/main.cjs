@@ -24,7 +24,11 @@ ipcMain.handle('pdfking:install-cli', async () => {
   await fs.mkdir(path.dirname(skillTarget), { recursive: true })
   await fs.copyFile(skillSource, skillTarget)
   const launcher = path.join(root, process.platform === 'win32' ? 'pdf-dock.cmd' : 'pdf-dock')
-  const content = process.platform === 'win32' ? `@echo off\r\n"${process.execPath}" "${cliTarget}" %*\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${cliTarget}" "$@"\n`
+  const appPath = app.getAppPath()
+  const quote = (value) => "'" + value.replace(/'/g, "'\\''") + "'"
+  const content = process.platform === 'win32'
+    ? `@echo off\r\nset "ELECTRON_RUN_AS_NODE=1"\r\nset "PDF_DOCK_ELECTRON=${process.execPath}"\r\nset "PDF_DOCK_APP=${appPath}"\r\nset "PDF_DOCK_VERSION=${app.getVersion()}"\r\n"${process.execPath}" "${cliTarget}" %*\r\n`
+    : `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexport PDF_DOCK_ELECTRON=${quote(process.execPath)}\nexport PDF_DOCK_APP=${quote(appPath)}\nexport PDF_DOCK_VERSION=${quote(app.getVersion())}\nexec ${quote(process.execPath)} ${quote(cliTarget)} "$@"\n`
   await fs.writeFile(launcher, content, { mode: 0o755 })
   return { launcher, skill: skillTarget }
 })
