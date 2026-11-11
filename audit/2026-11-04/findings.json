@@ -1,0 +1,1007 @@
+[
+  {
+    "id": 1,
+    "title": "Adding a valid local font fails with a Promise-cloning error",
+    "severity": "High",
+    "status": "UI reproduced",
+    "kind": "Defect",
+    "reproduction": "Settings \u2192 General \u2192 Add font; choose public/fonts/NotoSans-Regular.ttf.",
+    "actual": "The UI reports: Failed to execute 'put' on 'IDBObjectStore': #<Promise> could not be cloned. readFontFamilyName is async, but addLocalFont passes its unawaited result as the stored name.",
+    "expected": "A supported TTF should appear in the font library and be usable in text editing.",
+    "impact": "The advertised font-import feature fails before a font can be stored.",
+    "suggested_fix": "Await readFontFamilyName before constructing the record; close/abort the font transaction on synchronous action failures.",
+    "sources": [
+      {
+        "path": "src/pages/SettingsPage.jsx",
+        "line": 151,
+        "needle": "const name = readFontFamilyName"
+      },
+      {
+        "path": "src/editor/localFonts.js",
+        "line": 31,
+        "needle": "export async function readFontFamilyName"
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Manage fields crashes after accepting detected fields",
+    "severity": "High",
+    "status": "UI reproduced",
+    "kind": "Defect",
+    "reproduction": "Open supervisor/FormSuggestions.pdf \u2192 Form \u2192 Detect fields on this page \u2192 accept Name and Phone \u2192 Manage fields.",
+    "actual": "The error boundary replaces the app with \u201cCannot read properties of null (reading 'x')\u201d. Detection and acceptance produce objects without key. RegionLayer compares preview?.key to item.key; both are undefined, so it picks null preview as the rectangle and reads r.x. Updates/deletions also identify annotations by key.",
+    "expected": "Accepted fields should remain visible and independently editable.",
+    "impact": "A normal form-building workflow crashes the workspace and requires a reload.",
+    "suggested_fix": "Assign a stable unique key when accepting each candidate and require preview to exist before comparing keys.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1690,
+        "needle": "<FormCandidatesPanel candidates="
+      },
+      {
+        "path": "src/editor/RegionLayer.jsx",
+        "line": 29,
+        "needle": "const r=preview?.key===item.key"
+      },
+      {
+        "path": "src/editor/formDetection.js",
+        "line": 27,
+        "needle": "candidates.push({"
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Character tracking is not written within PDF text runs",
+    "severity": "Medium",
+    "status": "Engine reproduced",
+    "kind": "Defect",
+    "reproduction": "Add a text box containing ABCD, set Tracking to 5 pt, save; compare with tracking 0.",
+    "actual": "The engine probe generated identical page content streams for tracking 0 and 5, with no Tc operator. applyOperations passes characterSpacing to pdf-lib page.drawText, but the installed drawText implementation does not consume that option. Cursor offsets between separate runs do not add tracking within a word.",
+    "expected": "Saved glyph spacing should match the editor preview.",
+    "impact": "Text can look correct during editing and lose its tracking in the saved PDF.",
+    "suggested_fix": "Emit PDF character-spacing operators around the text run, or position glyphs using a supported drawing path.",
+    "sources": [
+      {
+        "path": "src/editor/operations.js",
+        "line": 195,
+        "needle": "characterSpacing:"
+      },
+      {
+        "path": "node_modules/pdf-lib/cjs/api/PDFPage.js",
+        "line": 832,
+        "needle": "PDFPage.prototype.drawText = function"
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "title": "Text wrapping and alignment measure width without tracking",
+    "severity": "Medium",
+    "status": "Engine reproduced",
+    "kind": "Defect",
+    "reproduction": "Use a narrow text box and increase tracking enough that a line should wrap; also try centered text.",
+    "actual": "layoutStyledText measures only font.widthOfTextAtSize. The probe returned the same 58.92-point width and one-line layout for AA AA at tracking 0 and 10 in a 75-point box. Four 10-point character gaps would make the latter exceed the box. Alignment and overflow checks consume these unadjusted widths.",
+    "expected": "Wrapping, alignment and overflow checks should include the requested character gaps.",
+    "impact": "Lines wrap at the wrong positions and centered/right-aligned text is positioned using the wrong width. This remains a separate layout defect after fixing the writer in finding 3.",
+    "suggested_fix": "Include signed tracking in token, chunk and line widths, and account for gaps across run boundaries.",
+    "sources": [
+      {
+        "path": "src/editor/styledText.js",
+        "line": 18,
+        "needle": "const tokenWidth ="
+      },
+      {
+        "path": "src/editor/operations.js",
+        "line": 182,
+        "needle": "available - line.width"
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "title": "Opacity and line-height changes do not create text undo steps",
+    "severity": "Medium",
+    "status": "Engine reproduced",
+    "kind": "Defect",
+    "reproduction": "While editing text, change only opacity or line height, then try Undo.",
+    "actual": "recordTextInput compares a signature that omits opacity and lineHeightScale. The probe changed both values and produced zero past entries while replacing present with the new style.",
+    "expected": "Each committed user-visible formatting change should be undoable.",
+    "impact": "The change cannot be undone by the active text history; a later undo can skip it.",
+    "suggested_fix": "Include all editable formatting state in the history comparison, while still excluding transient selection metadata.",
+    "sources": [
+      {
+        "path": "src/editor/textInputHistory.js",
+        "line": 1,
+        "needle": "const signature ="
+      },
+      {
+        "path": "src/editor/RichTextInput.jsx",
+        "line": 48,
+        "needle": "recordTextInput(history.current, edit)"
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "title": "Opacity applied to a text selection is stored but not rendered or exported",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Edit a paragraph, select some characters, and change Text opacity.",
+    "actual": "The inspector effect appends opacity to styleRanges for a nonempty selection. RichTextInput and renderStyledText do not apply range opacity; the PDF writer uses only operation.opacity, and font-run resolution drops range opacity.",
+    "expected": "Either apply opacity to the selected characters or explicitly apply it to the whole text box.",
+    "impact": "An enabled control accepts a selection-level change that has no visible or saved effect.",
+    "suggested_fix": "Render/export per-run opacity, or treat opacity as a box property before the range-style branch.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 3308,
+        "needle": "if (end > start) return"
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 3198,
+        "needle": "function renderStyledText("
+      },
+      {
+        "path": "src/editor/operations.js",
+        "line": 194,
+        "needle": "Number(operation.opacity ?? 1)"
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "title": "100% and 115% line-height choices are overridden by a 120% minimum",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Choose 100% or 115% line height before placing a new multiline text box, then type into it and let the input remeasure.",
+    "actual": "TextInspector offers those choices, but fitTextInput raises the box lineHeightScale to at least maxFontScale * 1.2 whenever it measures a non-source-layout edit.",
+    "expected": "The selected supported line height should persist and govern the text layout.",
+    "impact": "Compact line spacing cannot be achieved despite the controls offering it.",
+    "suggested_fix": "Separate minimum box height from requested line spacing; preserve the explicit line-height setting.",
+    "sources": [
+      {
+        "path": "src/components/TextInspector.jsx",
+        "line": 17,
+        "needle": "span>Line height"
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 3271,
+        "needle": "Math.max(current.lineHeightScale || 0, maxFontScale * 1.2)"
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "title": "Placing a very tall or very wide image can distort its aspect ratio",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Add a tall image, such as 100 \u00d7 10000 pixels, to an upright PDF page; compare its proportions to the source.",
+    "actual": "placeImageFile fixes width at 0.4 of the page and separately clamps height to 0.02\u20130.95. When the calculated height hits either limit, width is not recomputed even though aspectLocked is true. The resulting rectangle has a different source aspect.",
+    "expected": "A new image should be scaled uniformly to fit both limits.",
+    "impact": "Valid images are stretched on insertion, requiring manual correction.",
+    "suggested_fix": "Calculate one uniform fit scale from both page dimensions, then derive both width and height.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1441,
+        "needle": "const width = 0.4"
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1442,
+        "needle": "const height = Math.max(0.02"
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "title": "Uploading the same signature file cannot reliably retry a failed attempt",
+    "severity": "Low",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Upload an invalid signature image, repair/replace that file externally, then choose the same path again.",
+    "actual": "SignaturePanel does not clear the file input value after reading it, unlike ImageInspector. Reselecting the same path can produce no change event; its decode-error state is also never cleared on a later successful upload.",
+    "expected": "Same-file retry should run decoding again and remove stale error messages on success.",
+    "impact": "The signature flow can appear unresponsive or keep showing an error after recovery.",
+    "suggested_fix": "Capture the File, reset the input value immediately, and clear the previous error before/successfully after decoding.",
+    "sources": [
+      {
+        "path": "src/editor/SignaturePanel.jsx",
+        "line": 90,
+        "needle": "const file = e.target.files?.[0]"
+      },
+      {
+        "path": "src/components/ImageInspector.jsx",
+        "line": 98,
+        "needle": "event.target.value = ''"
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "title": "Invalid suggested field names are accepted and fail only during save/apply",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Detect fields, clear a candidate name or give two candidates the same name, accept them, then Apply/Save.",
+    "actual": "Acceptance removes the suggestion from the review panel and adds an operation without validating the name. The engine rejects empty/dotted names and collisions only when materializing all edits.",
+    "expected": "Reject the bad name before acceptance and retain the candidate for correction.",
+    "impact": "A late form error blocks the whole pending operation set after the user has done additional work. The candidate-key crash is a separate defect in finding 2.",
+    "suggested_fix": "Validate nonempty unique names against existing fields and pending creates at acceptance, with an inline error.",
+    "sources": [
+      {
+        "path": "src/editor/FormCandidatesPanel.jsx",
+        "line": 12,
+        "needle": "value={candidate.name}"
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1690,
+        "needle": "<FormCandidatesPanel candidates="
+      },
+      {
+        "path": "src/editor/operations.js",
+        "line": 368,
+        "needle": "if (!name || name.includes('.'))"
+      }
+    ]
+  },
+  {
+    "id": 11,
+    "title": "Suggested fields can be accepted partly or entirely outside the page",
+    "severity": "Medium",
+    "status": "Engine reproduced",
+    "kind": "Defect",
+    "reproduction": "Set a detected field to x=90% and width=30%, accept it, and apply. Negative coordinates can also be typed.",
+    "actual": "The controlled inputs do not enforce their advisory min/max. displayRect requires finite coordinates and positive dimensions but not containment. The engine probe successfully created a widget whose right edge is about 735 points on a 612-point page.",
+    "expected": "Reject or clamp the complete rectangle to the visible page.",
+    "impact": "Created fields can be clipped or inaccessible in the output PDF.",
+    "suggested_fix": "Validate x/y, dimensions and x+width/y+height at acceptance and at the operation boundary.",
+    "sources": [
+      {
+        "path": "src/editor/FormCandidatesPanel.jsx",
+        "line": 31,
+        "needle": "Number(e.target.value) / 100"
+      },
+      {
+        "path": "src/editor/coordinates.js",
+        "line": 32,
+        "needle": "export function displayRect"
+      },
+      {
+        "path": "src/editor/operations.js",
+        "line": 366,
+        "needle": "if (type === \"form-create\")"
+      }
+    ]
+  },
+  {
+    "id": 12,
+    "title": "Single-document tools accept multiple inputs and silently process only the first",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Select several PDFs on Home and choose Compress N PDFs, or add multiple inputs to a conversion tool, then run it.",
+    "actual": "The picker/addFiles path permits multiple inputs for almost every tool; processKnown assigns file = files[0] and most nonaggregate branches use only that file. Home explicitly advertises Compress N PDFs for the selection.",
+    "expected": "Process every advertised input, or constrain the picker and wording to one input.",
+    "impact": "Users can mistake one converted/compressed document for a completed batch.",
+    "suggested_fix": "Define input cardinality per tool and either loop over inputs with per-file results or reject extra files visibly.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 62,
+        "needle": "const singleDocumentTools ="
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 414,
+        "needle": "const multi = aggregateInputTools"
+      },
+      {
+        "path": "src/pdfEngine.js",
+        "line": 969,
+        "needle": "const file = files[0]"
+      },
+      {
+        "path": "src/pages/HomePage.jsx",
+        "line": 156,
+        "needle": "Compress {"
+      }
+    ]
+  },
+  {
+    "id": 13,
+    "title": "Merge treats different PDFs with the same name and size as the same file",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Prepare two different PDFs with the same filename and byte length in different folders; add both to Merge.",
+    "actual": "Merge compares only name and size. Selecting a matching item removes the existing entry as a toggle instead of retaining the second document. Content and source path are not considered.",
+    "expected": "Distinct files should remain distinct; toggling a recent entry should use its stable identity.",
+    "impact": "The merged result can omit an intended input without a clear duplicate warning.",
+    "suggested_fix": "Use source/library identity or a content digest, and distinguish explicit selection toggles from new file imports.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 415,
+        "needle": "const sameFile ="
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 419,
+        "needle": "if (existingIndex >= 0) return current.filter"
+      }
+    ]
+  },
+  {
+    "id": 14,
+    "title": "Malformed bookmark lines are silently discarded when replacing an outline",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Enter \u201c1: Introduction\u201d and \u201c2 Results\u201d in Bookmarks, then apply to a multi-page PDF.",
+    "actual": "The UI parser maps unmatched lines to null and filters them out. Because one valid entry remains, the engine succeeds and replaces the existing outline with that partial list.",
+    "expected": "Report the malformed line and require correction before replacing the outline.",
+    "impact": "A small formatting mistake can silently remove intended bookmarks from a successful output.",
+    "suggested_fix": "Validate every nonempty line with a line-numbered error instead of filtering invalid entries.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 523,
+        "needle": "toolId === 'edit-bookmarks' ?"
+      },
+      {
+        "path": "src/pdfEngine.js",
+        "line": 936,
+        "needle": "async function editBookmarks"
+      }
+    ]
+  },
+  {
+    "id": 15,
+    "title": "The PowerPoint picker offers legacy PPT although the converter rejects it",
+    "severity": "Low",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Open PowerPoint to PDF and choose a .ppt file in the file picker.",
+    "actual": "inputAccept includes .ppt and its legacy MIME type, while the engine immediately rejects that format and requires PPTX.",
+    "expected": "The picker should offer supported formats, with legacy conversion guidance before selection.",
+    "impact": "A format the app explicitly lets the user select cannot be converted.",
+    "suggested_fix": "Remove legacy PPT from the accept filter or implement a supported conversion route.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 53,
+        "needle": "if (toolId === 'powerpoint-to-pdf') return"
+      },
+      {
+        "path": "src/pdfEngine.js",
+        "line": 1465,
+        "needle": "if (/\\.ppt$/i.test"
+      }
+    ]
+  },
+  {
+    "id": 16,
+    "title": "The Save shortcut cannot find standalone tool output controls",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Run a standalone tool to produce an output, then press the configured Save document shortcut.",
+    "actual": "The main shortcut handler searches .output-row .browse-button. OutputSaveControls is rendered as a sibling of .output-row, so its Save file button is outside that selector. The other selector alternatives target editor controls, which are absent on the standalone result page.",
+    "expected": "The Save shortcut should invoke the output save action.",
+    "impact": "The app prevents the shortcut default but performs no save.",
+    "suggested_fix": "Call a shared imperative save action or select the actual .output-save-controls submit button.",
+    "sources": [
+      {
+        "path": "src/main.jsx",
+        "line": 988,
+        "needle": ".output-row .browse-button:not(:disabled)"
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 765,
+        "needle": "<OutputSaveControls output="
+      },
+      {
+        "path": "src/components/OutputSaveControls.jsx",
+        "line": 11,
+        "needle": "className=\"output-save-controls\""
+      }
+    ]
+  },
+  {
+    "id": 17,
+    "title": "Opening from Recent Files or the palette drops the library record identity",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Open a library-only PDF from Recent Files or Command palette, edit it and save to the library.",
+    "actual": "RecentFilesPage attaches sourcePath but not record.id as libraryId; CommandPalette attaches neither. Home/NewDocument do preserve libraryId. With sourcePath=null, changed bytes are hashed to a new record instead of updating the original library entry.",
+    "expected": "Every library open route should preserve the same record identity.",
+    "impact": "The original entry can remain stale while an edited duplicate is created.",
+    "suggested_fix": "Attach libraryId=record.id and sourcePath on both open routes and use a shared record-to-File helper.",
+    "sources": [
+      {
+        "path": "src/pages/RecentFilesPage.jsx",
+        "line": 71,
+        "needle": "file.sourcePath=record.sourcePath"
+      },
+      {
+        "path": "src/components/CommandPalette.jsx",
+        "line": 48,
+        "needle": "files: [new File([data]"
+      },
+      {
+        "path": "src/editor/save.js",
+        "line": 14,
+        "needle": "let libraryId ="
+      }
+    ]
+  },
+  {
+    "id": 18,
+    "title": "Files explicitly saved only in the app can be silently evicted as cache",
+    "severity": "High",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Choose PDF Dock library as the only output destination, then accumulate more than 50 library records or exceed its total-byte limit.",
+    "actual": "Explicit app saves use the recent-file backend. Both backends trim to 50 entries and delete older cached bytes; there is no distinction between disposable recent copies and the sole explicitly saved copy.",
+    "expected": "An explicit save destination should retain the document or warn/block before deleting it.",
+    "impact": "A user relying on \u201csave in app\u201d can lose the only stored copy without having requested deletion.",
+    "suggested_fix": "Separate durable library storage from recent-cache retention, or pin explicit saves and require an eviction decision.",
+    "sources": [
+      {
+        "path": "src/outputStorage.js",
+        "line": 23,
+        "needle": "await library.addRecentFile"
+      },
+      {
+        "path": "src/recentFiles.js",
+        "line": 107,
+        "needle": "async function trimLibrary"
+      },
+      {
+        "path": "electron/main.cjs",
+        "line": 470,
+        "needle": "if (trimmed.length >= 50"
+      }
+    ]
+  },
+  {
+    "id": 19,
+    "title": "Turning off recent copies immediately deletes the existing app library",
+    "severity": "High",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Save a PDF only to PDF Dock library, then turn off Keep local recent PDF copies in Settings.",
+    "actual": "The checkbox writes the preference and immediately calls handleClearCache, deleting all records and cached PDFs. Its explanatory text describes storing opened/exported PDFs, not deleting the existing library; there is no confirmation.",
+    "expected": "Disable future automatic retention separately from deleting existing explicitly saved documents.",
+    "impact": "A preference toggle can destroy library-only documents unexpectedly.",
+    "suggested_fix": "Do not clear durable records when the preference changes; make deletion a separately named, confirmed action.",
+    "sources": [
+      {
+        "path": "src/pages/SettingsPage.jsx",
+        "line": 332,
+        "needle": "if (!e.target.checked) handleClearCache()"
+      },
+      {
+        "path": "electron/main.cjs",
+        "line": 498,
+        "needle": "ipcMain.handle('pdfking:clear-recent-files'"
+      },
+      {
+        "path": "src/recentFiles.js",
+        "line": 196,
+        "needle": "export async function clearRecentFiles"
+      }
+    ]
+  },
+  {
+    "id": 20,
+    "title": "Tab navigation is blocked outside text-entry controls",
+    "severity": "High",
+    "status": "UI reproduced",
+    "kind": "Defect",
+    "reproduction": "On Home with an empty library, focus New document and press Tab. Also try Tab from non-input controls on other pages.",
+    "actual": "Focus stays on New document. The global handler prevents every unmodified Tab after the modal/editable guards; on Home it tries to focus the first file, and outside Home it has no replacement navigation.",
+    "expected": "Tab should advance through focusable controls unless a specific local widget intentionally handles it.",
+    "impact": "Keyboard users can become stuck and cannot traverse normal app controls.",
+    "suggested_fix": "Remove the unconditional global Tab interception and scope preview shortcuts to the focused library widget.",
+    "sources": [
+      {
+        "path": "src/main.jsx",
+        "line": 1018,
+        "needle": "if (e.key === 'Tab' && !e.metaKey"
+      },
+      {
+        "path": "src/main.jsx",
+        "line": 929,
+        "needle": "const editing = target instanceof HTMLElement"
+      }
+    ]
+  },
+  {
+    "id": 21,
+    "title": "Tabbing out of a custom select leaves its popup open and jumps focus",
+    "severity": "Medium",
+    "status": "UI reproduced",
+    "kind": "Defect",
+    "reproduction": "New document \u2192 open Page size \u2192 press Tab.",
+    "actual": "The listbox remains open with aria-expanded=true, but focus jumps to Close new document dialog. The menu is portaled outside the modal and the global trap treats its focused option as outside the dialog. The select has no Tab/blur dismissal path.",
+    "expected": "Tab should close the list and move logically to the next control, respecting the modal focus scope.",
+    "impact": "Keyboard navigation skips the next form control and leaves a detached popup behind.",
+    "suggested_fix": "Integrate portal menus with the dialog focus scope and close/commit appropriately on Tab and focus leaving the menu.",
+    "sources": [
+      {
+        "path": "src/components/ThemedSelect.jsx",
+        "line": 99,
+        "needle": "const onOptionKeyDown ="
+      },
+      {
+        "path": "src/components/ThemedSelect.jsx",
+        "line": 129,
+        "needle": "createPortal(<div"
+      },
+      {
+        "path": "src/main.jsx",
+        "line": 873,
+        "needle": "const trap = (event)"
+      }
+    ]
+  },
+  {
+    "id": 22,
+    "title": "Collapsing the sidebar drops focus to the document body",
+    "severity": "Low",
+    "status": "UI reproduced",
+    "kind": "Defect",
+    "reproduction": "Focus/activate Collapse sidebar and inspect the focused element after collapse.",
+    "actual": "The focused collapse button unmounts; document.activeElement becomes BODY. The replacement Expand sidebar button is a different DOM node and no focus handoff occurs.",
+    "expected": "Focus should move to the new expand control or remain on a persistent toggle.",
+    "impact": "Keyboard users lose their place; the global Tab issue can compound recovery.",
+    "suggested_fix": "Use one persistent toggle or explicitly focus its replacement after changing the layout.",
+    "sources": [
+      {
+        "path": "src/components/Sidebar.jsx",
+        "line": 114,
+        "needle": "sidebar-expand-button"
+      },
+      {
+        "path": "src/components/Sidebar.jsx",
+        "line": 119,
+        "needle": "!isCollapsed && !phoneLayout"
+      }
+    ]
+  },
+  {
+    "id": 23,
+    "title": "Onboarding GitHub connection never displays the required device code",
+    "severity": "High",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "During onboarding Setup, choose Connect GitHub; the browser opens GitHub device authorization.",
+    "actual": "The IPC response includes userCode, but Onboarding uses only verificationUri/sessionId and never renders or copies userCode. GitHub device authorization at the verification URI requires that code. The separate Settings flow does display it.",
+    "expected": "Show the code beside the authorization action, with copy and retry controls.",
+    "impact": "The onboarding connection flow withholds the information needed to complete authorization.",
+    "suggested_fix": "Reuse the Settings device-auth UI/state rather than maintaining a reduced onboarding-only loop.",
+    "sources": [
+      {
+        "path": "src/components/Onboarding.jsx",
+        "line": 144,
+        "needle": "const s = await window.pdfKing.githubStartDeviceAuth"
+      },
+      {
+        "path": "electron/main.cjs",
+        "line": 60,
+        "needle": "userCode: payload.user_code"
+      },
+      {
+        "path": "src/components/FeedbackSettings.jsx",
+        "line": 54,
+        "needle": "deviceCode.userCode"
+      }
+    ]
+  },
+  {
+    "id": 24,
+    "title": "The installed CLI launcher is not a working standalone CLI installation",
+    "severity": "High",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Select Install the command-line tools in onboarding, then invoke the generated launcher.",
+    "actual": "Installation copies only bin/pdf-dock.mjs to userData/cli and executes it with process.execPath, which is the Electron app executable. The script assumes a repository parent containing the app and a require('electron') value suitable for spawn. In that installed location the parent is userData; in an Electron main context require('electron') is the API object, not the npm binary path. No installed app-root/binary configuration is supplied.",
+    "expected": "The installed launcher should run the packaged app in CLI mode and resolve its resources correctly.",
+    "impact": "The onboarding installation can report completion while the resulting command fails or starts the wrong entry path.",
+    "suggested_fix": "Generate a launcher that invokes the packaged app with --pdf-dock-cli and an explicit request transport, or ship a supported Node entry with correct app/binary paths.",
+    "sources": [
+      {
+        "path": "electron/main.cjs",
+        "line": 20,
+        "needle": "const cliTarget = path.join(root, 'pdf-dock.mjs')"
+      },
+      {
+        "path": "electron/main.cjs",
+        "line": 27,
+        "needle": "const content = process.platform"
+      },
+      {
+        "path": "bin/pdf-dock.mjs",
+        "line": 69,
+        "needle": "const electron = require('electron')"
+      },
+      {
+        "path": "bin/pdf-dock.mjs",
+        "line": 9,
+        "needle": "const root = path.resolve"
+      }
+    ]
+  },
+  {
+    "id": 25,
+    "title": "A failed optional CLI install leaves onboarding completion in an inconsistent state",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Finish onboarding with Install command-line tools checked when copying/writing the launcher or skill fails, for example because the destination is unwritable.",
+    "actual": "handleFinishOnboarding persists the completion marker before awaiting installCli; Onboarding.finish returns that promise with no error handling. A rejection prevents setShowOnboarding(false), surfaces no setupError, yet the next reload sees onboarding as completed.",
+    "expected": "Explain the failed optional step and allow retry or completion without it.",
+    "impact": "The setup overlay can remain open with no useful error, then disappear on reload despite the failed installation.",
+    "suggested_fix": "Catch the installation failure, show it in the setup panel, and only finalize the completion state after resolving the optional step.",
+    "sources": [
+      {
+        "path": "src/main.jsx",
+        "line": 912,
+        "needle": "window.localStorage.setItem('pdfking-onboarding-complete', 'true')"
+      },
+      {
+        "path": "src/main.jsx",
+        "line": 913,
+        "needle": "if (installCli) await"
+      },
+      {
+        "path": "src/components/Onboarding.jsx",
+        "line": 19,
+        "needle": "const finish ="
+      }
+    ]
+  },
+  {
+    "id": 26,
+    "title": "Keyboard-only text selection has no highlight/underline/strike commit path",
+    "severity": "Medium",
+    "status": "Code confirmed",
+    "kind": "Defect",
+    "reproduction": "Activate a text-markup tool and select text using keyboard selection instead of a pointer release.",
+    "actual": "AnnotationLayer creates markup only from pointerup on the page node. There is no keyboard activation or selection-confirm command for the markup tools.",
+    "expected": "Provide an accessible way to apply the selected markup to a keyboard-created text range.",
+    "impact": "These annotation features cannot be completed through the keyboard-only path.",
+    "suggested_fix": "Add an explicit Apply markup command/shortcut that consumes the current page-contained selection.",
+    "sources": [
+      {
+        "path": "src/editor/AnnotationLayer.jsx",
+        "line": 62,
+        "needle": "node?.addEventListener(\"pointerup\", select)"
+      }
+    ]
+  },
+  {
+    "id": 27,
+    "title": "Form and annotation regions cannot be moved or resized from the keyboard",
+    "severity": "Medium",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Tab to a RegionLayer field/annotation, press Enter to select it, then try to adjust its rectangle without a pointer.",
+    "actual": "The region is keyboard-focusable and Enter selects it, but movement and resize are implemented only by pointer gestures.",
+    "expected": "Offer arrow-key movement/resize or accessible numeric geometry controls.",
+    "impact": "Keyboard and assistive-input users can select objects but cannot complete placement corrections.",
+    "suggested_fix": "Add documented keyboard geometry actions, with modified arrows for resize/fine movement and an announced position.",
+    "sources": [
+      {
+        "path": "src/editor/RegionLayer.jsx",
+        "line": 32,
+        "needle": "onKeyDown={e=>{if(e.key==='Enter')"
+      }
+    ]
+  },
+  {
+    "id": 28,
+    "title": "Existing radio options require rebuilding the whole group to make corrections",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Create/apply a radio group, then use Manage fields to rename/remove one of its answer options.",
+    "actual": "The inspector explicitly fixes radio choices after creation; deleting a widget removes the entire field group. There is no widget/option edit flow.",
+    "expected": "Allow correcting one answer or provide a guided group rebuild that preserves placement and values.",
+    "impact": "A small answer-label change can require recreating the entire group.",
+    "suggested_fix": "Support option/widget updates or a clear rebuild operation that retains the existing geometry.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1664,
+        "needle": "Radio choices are fixed after creation"
+      },
+      {
+        "path": "src/editor/operations.js",
+        "line": 348,
+        "needle": "form.removeField(field)"
+      }
+    ]
+  },
+  {
+    "id": 29,
+    "title": "Shortening a Shift-selected file range keeps the old range selected",
+    "severity": "Medium",
+    "status": "UI reproduced",
+    "kind": "Defect",
+    "reproduction": "With Gamma, Beta, Alpha rows: click Gamma, Shift-click Alpha, then Shift-click Beta to shorten the range.",
+    "actual": "All three checkboxes remain checked, including Alpha. selectFileRange unions each range into the existing Set instead of replacing the previous range.",
+    "expected": "A shortened Shift range should contain Gamma and Beta, preserving only separately intentional additive selections.",
+    "impact": "Bulk processing/removal can include files the user tried to deselect.",
+    "suggested_fix": "Track the anchor and the pre-range selection separately, then replace the active range on each Shift action.",
+    "sources": [
+      {
+        "path": "src/pages/HomePage.jsx",
+        "line": 280,
+        "needle": "new Set([...current, ...rangeIds])"
+      }
+    ]
+  },
+  {
+    "id": 30,
+    "title": "Filtering should make hidden selected-file targets explicit before bulk actions",
+    "severity": "Medium",
+    "status": "Improvement; UI behavior observed",
+    "kind": "Improvement",
+    "reproduction": "Select three library files, then filter to Beta so only one row remains.",
+    "actual": "The UI continues offering Merge 3 PDFs, Compress 3 PDFs and Remove 3 files. It does show the count, but the two hidden target names are not visible in the filtered list.",
+    "expected": "Retain selection only with a clear reveal/list of all action targets, or offer to limit the action to visible files.",
+    "impact": "A bulk action can affect hidden files without a name-level review. The count reduces ambiguity but does not identify the targets.",
+    "suggested_fix": "Add \u201cShow selected\u201d, list target filenames in confirmation, and offer clear-hidden-selection.",
+    "sources": [
+      {
+        "path": "src/pages/HomePage.jsx",
+        "line": 253,
+        "needle": "const visibleFiles = files.filter"
+      },
+      {
+        "path": "src/pages/HomePage.jsx",
+        "line": 399,
+        "needle": "const selected = files.filter"
+      }
+    ]
+  },
+  {
+    "id": 31,
+    "title": "The library exposes metadata columns without a way to sort them",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Accumulate files and try to sort by filename, file size, page count or last opened.",
+    "actual": "Home filters by name and presents static column headers; it has no user-selectable sort state or controls.",
+    "expected": "Offer stable ascending/descending sort controls for the displayed metadata.",
+    "impact": "Finding a document in a larger library requires manual scanning or knowing its filename.",
+    "suggested_fix": "Add accessible sortable header buttons and persist the selected ordering.",
+    "sources": [
+      {
+        "path": "src/pages/HomePage.jsx",
+        "line": 253,
+        "needle": "const visibleFiles = files.filter"
+      },
+      {
+        "path": "src/pages/HomePage.jsx",
+        "line": 622,
+        "needle": "Last opened"
+      }
+    ]
+  },
+  {
+    "id": 32,
+    "title": "Text size cannot be entered freely",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Add text and try to set a new size such as 13, 15 or 22 points.",
+    "actual": "TextInspector uses a noneditable ThemedSelect containing eight presets plus the current size. The floating ribbon uses the same preset approach.",
+    "expected": "Allow a numeric size to match the document while keeping useful presets.",
+    "impact": "Users cannot choose common intermediate sizes unless a selected source object already contributes that exact size.",
+    "suggested_fix": "Use an editable numeric combobox with finite/range validation.",
+    "sources": [
+      {
+        "path": "src/components/TextInspector.jsx",
+        "line": 8,
+        "needle": "const sizes ="
+      },
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 3726,
+        "needle": "ariaLabel=\"Font size\""
+      }
+    ]
+  },
+  {
+    "id": 33,
+    "title": "The font-weight control reduces all weights to Regular or Bold",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Work with a font family/source text that uses medium, semibold or heavy weights and open Weight.",
+    "actual": "The control represents only 400 and 700 through a boolean bold state, even for fonts that provide more weights.",
+    "expected": "Preserve the source weight and expose supported numeric/named weights when available.",
+    "impact": "Matching existing typography or choosing semibold/medium is not possible through the inspector.",
+    "suggested_fix": "Retain numeric weight metadata and populate the control from available font faces/axes.",
+    "sources": [
+      {
+        "path": "src/components/TextInspector.jsx",
+        "line": 13,
+        "needle": "ariaLabel=\"Font weight\""
+      }
+    ]
+  },
+  {
+    "id": 34,
+    "title": "Rich-text paste silently discards source formatting",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Copy bold/colored text from a formatted document and paste it into the PDF rich-text input.",
+    "actual": "The paste handler prevents the normal paste and inserts only text/plain. There is no keep-formatting choice or explanation.",
+    "expected": "Offer a clear paste policy or a choice between text-only and supported source formatting.",
+    "impact": "Users must manually reconstruct formatting after a paste.",
+    "suggested_fix": "Document text-only paste and/or parse supported clipboard HTML into text style ranges.",
+    "sources": [
+      {
+        "path": "src/editor/RichTextInput.jsx",
+        "line": 152,
+        "needle": "event.clipboardData.getData('text/plain')"
+      }
+    ]
+  },
+  {
+    "id": 35,
+    "title": "Blank documents have no custom page-size option",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "New document \u2192 Page size; try creating an A5 page, square document or custom-size form.",
+    "actual": "The dialog offers only A4, Letter and Legal plus orientation and page count.",
+    "expected": "Allow custom dimensions with units, alongside presets.",
+    "impact": "Small-format forms, labels and custom layouts require another tool or later manual cropping.",
+    "suggested_fix": "Add a Custom preset with width/height and units, validated before creation.",
+    "sources": [
+      {
+        "path": "src/pages/NewDocumentPage.jsx",
+        "line": 225,
+        "needle": "value={pageSize}"
+      }
+    ]
+  },
+  {
+    "id": 36,
+    "title": "PDF-to-image export has no page-range control",
+    "severity": "Medium",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Open a large PDF in PDF to JPG/PNG and try exporting only page 2.",
+    "actual": "The options contain format, resolution and JPEG quality only; the engine loops from 1 through every page.",
+    "expected": "Offer selected pages/ranges and show the expected output count.",
+    "impact": "Users must render and handle unwanted images, increasing time and memory for large PDFs.",
+    "suggested_fix": "Reuse the existing page-range selector and pass the chosen sequence to the export loop.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1762,
+        "needle": "case 'pdf-to-jpg':"
+      },
+      {
+        "path": "src/pdfEngine.js",
+        "line": 1102,
+        "needle": "if (toolId === 'pdf-to-jpg')"
+      }
+    ]
+  },
+  {
+    "id": 37,
+    "title": "Multi-output tools require saving each result separately",
+    "severity": "Medium",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Export many pages as images or split every PDF page, then try to save all results in one action.",
+    "actual": "The results panel maps every output to its own OutputSaveControls. There is no Save all/archive action.",
+    "expected": "Offer one batch save, with ZIP download in the browser and a destination-folder option on desktop.",
+    "impact": "A 100-page result can require 100 save interactions and filenames/destinations to manage individually.",
+    "suggested_fix": "Add a batch destination/naming flow and preserve per-output retry status.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 758,
+        "needle": "outputs.map((output, outputIndex)"
+      },
+      {
+        "path": "src/components/OutputSaveControls.jsx",
+        "line": 28,
+        "needle": "Save file"
+      }
+    ]
+  },
+  {
+    "id": 38,
+    "title": "Watermark controls cannot change text size or placement",
+    "severity": "Low",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Add a watermark and try placing small text in a corner or matching a specific font size.",
+    "actual": "The UI exposes text, target pages, opacity and three angles, but no size, position or alignment controls.",
+    "expected": "Allow placement and scale choices, ideally with a preview.",
+    "impact": "Users cannot adapt the watermark to common header/footer and corner-label layouts.",
+    "suggested_fix": "Expose size and position presets with optional numeric offsets and a visual preview.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1759,
+        "needle": "case 'add-watermark':"
+      }
+    ]
+  },
+  {
+    "id": 39,
+    "title": "Bookmark editing cannot load/preserve an existing hierarchical outline",
+    "severity": "Medium",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Open a PDF with nested bookmarks and choose Bookmarks to adjust one title or destination.",
+    "actual": "The tool accepts a new flat page:title list and replaces the outline. It does not populate existing bookmarks or represent nesting.",
+    "expected": "Offer existing-outline editing, or an explicit replace-only workflow with import/export of the current outline.",
+    "impact": "A small change requires reconstructing the outline and can flatten its hierarchy.",
+    "suggested_fix": "Read the existing outline into an editable tree and preserve untouched nodes/destinations.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1774,
+        "needle": "case 'edit-bookmarks':"
+      },
+      {
+        "path": "src/pdfEngine.js",
+        "line": 949,
+        "needle": "const root = context.obj({ Type: 'Outlines'"
+      }
+    ]
+  },
+  {
+    "id": 40,
+    "title": "OCR language menus do not distinguish installed packs from unavailable ones",
+    "severity": "Medium",
+    "status": "Improvement",
+    "kind": "Improvement",
+    "reproduction": "Choose Spanish, French, German, Italian, Portuguese or Hindi on a default installation with a scanned PDF.",
+    "actual": "The menus offer all seven languages, but public/ocr contains only eng.traineddata.gz and workers load from that local directory. The OCR note mentions manually supplied packs; there is no installed-status check or in-app installation flow, and Word/PPTX conversion uses the same choices.",
+    "expected": "Identify which languages are ready before processing and guide installation of missing packs.",
+    "impact": "A permitted language choice can spend time initializing OCR and then fail for missing data.",
+    "suggested_fix": "Detect available packs, mark/disable unavailable choices, and provide a language-pack installation or selection workflow.",
+    "sources": [
+      {
+        "path": "src/pages/ToolStudioPage.jsx",
+        "line": 1788,
+        "needle": "const OCR_LANGUAGES ="
+      },
+      {
+        "path": "src/pdfEngine.js",
+        "line": 439,
+        "needle": "langPath:new URL('ocr/'"
+      },
+      {
+        "path": "public/ocr/eng.traineddata.gz",
+        "line": null,
+        "needle": null
+      }
+    ]
+  }
+]

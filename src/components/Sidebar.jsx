@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../icons'
 import { allTools, categories } from '../toolsData'
@@ -9,6 +9,8 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
   const [expandedCategory, setExpandedCategory] = useState(null)
   const [flyout, setFlyout] = useState(null)
   const closeTimer = useRef(null)
+  const toggleButton = useRef(null)
+  const restoreToggleFocus = useRef(false)
   const visibleCategories = categories.filter((category) => TOOL_CATEGORY_IDS.includes(category.id))
   const isCollapsed = collapsed && !phoneLayout
   const isEditorActive = currentView.type === 'tool' && currentView.toolId === 'pdf-editor'
@@ -16,6 +18,13 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
   const cancelFlyoutClose = () => window.clearTimeout(closeTimer.current)
   const deferFlyoutClose = () => { closeTimer.current = window.setTimeout(() => setFlyout(null), 140) }
   const navigate = (view) => { setFlyout(null); onNavigate(view); onCloseMobileNav?.() }
+  const toggleSidebar = (event) => {
+    restoreToggleFocus.current = document.activeElement === event.currentTarget
+    onToggleCollapsed()
+  }
+  useLayoutEffect(() => {
+    if (restoreToggleFocus.current) { toggleButton.current?.focus(); restoreToggleFocus.current = false }
+  }, [isCollapsed])
 
   useEffect(() => {
     if (currentView.type !== 'tool') return
@@ -111,12 +120,12 @@ export function Sidebar({ currentView, onNavigate, onOpenNewDocument, onToggleCo
       </nav>
 
       <div className="sidebar-bottom">
-        {isCollapsed && <button type="button" className="sidebar-collapse-button sidebar-expand-button" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
+        {isCollapsed && <button ref={toggleButton} type="button" className="sidebar-collapse-button sidebar-expand-button" aria-label="Expand sidebar" title="Expand sidebar" onClick={toggleSidebar}><Icon name="sidebar" size={17} /></button>}
         <div className={`sidebar-footer-row ${isCollapsed ? 'is-collapsed' : ''}`}>
           <button className={`sidebar-settings ${currentView.type === 'settings' ? 'active' : ''}`} type="button" title={isCollapsed ? 'Settings' : undefined} onClick={() => navigate({ type: 'settings' })}>
             <Icon name="sliders" size={19} /><span>Settings</span>
           </button>
-          {!isCollapsed && !phoneLayout && <button type="button" className="sidebar-collapse-button" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={onToggleCollapsed}><Icon name="sidebar" size={17} /></button>}
+          {!isCollapsed && !phoneLayout && <button ref={toggleButton} type="button" className="sidebar-collapse-button" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={toggleSidebar}><Icon name="sidebar" size={17} /></button>}
         </div>
       </div>
     </aside>

@@ -1,11 +1,13 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../icons'
+import { tabbable } from 'tabbable'
 
 const THEME_PROPERTIES = ['--bg', '--panel', '--panel-hover', '--border', '--text', '--text-dim', '--muted', '--accent', '--accent-soft', '--accent-border', '--accent-contrast', '--focus-ring']
 
 export function ThemedSelect({ value, options = [], onChange, className = '', style, ariaLabel, disabled = false, id }) {
   const generatedId = useId()
+  const triggerId = id || `${generatedId}-trigger`
   const listId = `${id || generatedId}-options`
   const rootRef = useRef(null)
   const triggerRef = useRef(null)
@@ -63,6 +65,10 @@ export function ThemedSelect({ value, options = [], onChange, className = '', st
       close(false)
     }
     document.addEventListener('pointerdown', dismiss, true)
+    const dismissOnFocus = (event) => {
+      if (!rootRef.current?.contains(event.target) && !menuRef.current?.contains(event.target)) close(false)
+    }
+    document.addEventListener('focusin', dismissOnFocus, true)
     window.addEventListener('keydown', dismiss, true)
     const reposition = () => {
       const trigger = triggerRef.current
@@ -78,6 +84,7 @@ export function ThemedSelect({ value, options = [], onChange, className = '', st
     window.addEventListener('scroll', reposition, true)
     return () => {
       document.removeEventListener('pointerdown', dismiss, true)
+      document.removeEventListener('focusin', dismissOnFocus, true)
       window.removeEventListener('keydown', dismiss, true)
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
@@ -97,7 +104,20 @@ export function ThemedSelect({ value, options = [], onChange, className = '', st
     }
   }
   const onOptionKeyDown = (event) => {
-    if (event.key === 'ArrowDown') { event.preventDefault(); moveActive(1) }
+    if (event.key === 'Tab') {
+      const trigger = triggerRef.current
+      const dialog = trigger?.closest('[role="dialog"], [role="alertdialog"]')
+      const scope = dialog || document.body
+      const controls = tabbable(scope).filter(node => !menuRef.current?.contains(node))
+      const index = controls.indexOf(trigger)
+      let nextIndex = index + (event.shiftKey ? -1 : 1)
+      if (dialog && controls.length) nextIndex = (nextIndex + controls.length) % controls.length
+      const next = index >= 0 ? controls[nextIndex] : null
+      close(false)
+      if (next) { event.preventDefault(); next.focus() }
+      else trigger?.focus()
+    }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); moveActive(1) }
     else if (event.key === 'ArrowUp') { event.preventDefault(); moveActive(-1) }
     else if (event.key === 'Home') { event.preventDefault(); setActiveIndex(0) }
     else if (event.key === 'End') { event.preventDefault(); setActiveIndex(options.length - 1) }
@@ -108,7 +128,7 @@ export function ThemedSelect({ value, options = [], onChange, className = '', st
     <span className="themed-select-host" ref={rootRef}>
       <button
         ref={triggerRef}
-        id={id}
+        id={triggerId}
         type="button"
         className={`themed-select-trigger ${className}`.trim()}
         style={style}
@@ -128,6 +148,7 @@ export function ThemedSelect({ value, options = [], onChange, className = '', st
     </span>
     {open && menuPosition && createPortal(<div
       ref={menuRef}
+      data-select-trigger={triggerId}
       id={listId}
       className="themed-select-menu"
       role="listbox"

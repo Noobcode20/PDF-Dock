@@ -1,0 +1,122 @@
+{
+  "context": {
+    "origin": "http://127.0.0.1:5176",
+    "profile": "fresh incognito",
+    "source": "isolated November 4 source snapshot",
+    "method": "visible DOM controls, dispatched click/shift-click/dblclick events, actual preview key presses and file-input uploads; no injected React state",
+    "not_exercised": [
+      "native installed app",
+      "real GitHub authorization",
+      "CLI installation"
+    ]
+  },
+  "font_import": {
+    "date": "2026-11-04",
+    "steps": [
+      "Settings",
+      "General",
+      "Add font",
+      "Choose public/fonts/NotoSans-Regular.ttf"
+    ],
+    "actual": "Failed to execute 'put' on 'IDBObjectStore': #<Promise> could not be cloned.",
+    "library": "No local fonts added yet."
+  },
+  "form_management_crash": {
+    "date": "2026-11-05",
+    "fixture": "FormSuggestions.pdf",
+    "steps": [
+      "Open fixture via Home",
+      "Form",
+      "Detect fields on this page",
+      "Accept Name",
+      "Accept Phone",
+      "Manage fields"
+    ],
+    "actual": "PDF Dock hit a problem\nCannot read properties of null (reading 'x')\nReload workspace",
+    "screenshot": "form-management-crash.png"
+  },
+  "global_tab": {
+    "date": "2026-11-05",
+    "steps": [
+      "On empty Home, focus New document button",
+      "Press Tab"
+    ],
+    "before": {
+      "tag": "BUTTON",
+      "aria-label": "New document"
+    },
+    "after": {
+      "tag": "BUTTON",
+      "aria-label": "New document"
+    }
+  },
+  "custom_select_tab": {
+    "date": "2026-11-04",
+    "steps": [
+      "New document",
+      "Open Page size",
+      "Press Tab"
+    ],
+    "after": {
+      "listboxOpen": true,
+      "comboboxExpanded": "true",
+      "focusedButton": "Close new document dialog"
+    }
+  },
+  "sidebar_focus": {
+    "date": "2026-11-04",
+    "steps": [
+      "Activate Collapse sidebar"
+    ],
+    "after": {
+      "sidebarClass": "sidebar collapsed",
+      "focusedTag": "BODY"
+    }
+  },
+  "range_selection": {
+    "date": "2026-11-05",
+    "fixtures": [
+      "Gamma.pdf",
+      "Beta.pdf",
+      "Alpha.pdf"
+    ],
+    "steps": [
+      "Click Gamma",
+      "Shift-click Alpha",
+      "Shift-click Beta to shorten range"
+    ],
+    "afterChecked": [
+      "Select Gamma.pdf",
+      "Select Beta.pdf",
+      "Select Alpha.pdf"
+    ],
+    "expectedChecked": [
+      "Select Gamma.pdf",
+      "Select Beta.pdf"
+    ]
+  },
+  "filter_selection": {
+    "date": "2026-11-05",
+    "steps": [
+      "Continue preceding selection",
+      "Enter Beta in Search recent PDFs"
+    ],
+    "visibleRows": [
+      "Beta.pdf"
+    ],
+    "actions": [
+      "Merge 3 PDFs",
+      "Compress 3 PDFs",
+      "Remove 3 files"
+    ],
+    "classification": "Observed behavior; target-disclosure improvement, not proof that persistent cross-filter selection is inherently invalid."
+  },
+  "working_paths": [
+    "Home imports three disposable PDFs into browser library",
+    "Home filters to Beta",
+    "Home double-click opens a PDF",
+    "PDF viewer eventually renders with no visible errors",
+    "Field detection finds Name and Phone from the fixture",
+    "Candidate acceptance succeeds before Manage fields crashes"
+  ]
+}

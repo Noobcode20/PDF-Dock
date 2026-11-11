@@ -1,0 +1,31 @@
+{
+  "tracking": {
+    "identicalPageContent": true,
+    "hasTcOperator": false,
+    "stream": "q\n1 0 0 1 0 0 cm\nq\n1 0 0 1 61.2 475.20000000000005 cm\n1 0 0 1 0 0 cm\nq\n/GS-9742682568 gs\nBT\n0.06666666666666667 0.06666666666666667 0.06666666666666667 rg\n/Helvetica-7098480789 20 Tf\n24 TL\n1 0 0 1 0 217.6 Tm\n<41424344> Tj\nT*\nET\nQ\nQ\nQ\n"
+  },
+  "history": {
+    "undoEntries": 0,
+    "presentOpacity": 0.5
+  },
+  "offPageField": {
+    "x": 550.3000000000001,
+    "y": 593.5,
+    "width": 184.60000000000002,
+    "height": 40.60000000000002
+  },
+  "wrap": {
+    "zero": [
+      {
+        "width": 58.92,
+        "text": "AA AA"
+      }
+    ],
+    "spaced": [
+      {
+        "width": 58.92,
+        "text": "AA AA"
+      }
+    ]
+  }
+}

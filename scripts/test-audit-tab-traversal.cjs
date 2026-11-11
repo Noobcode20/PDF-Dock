@@ -1,0 +1,57 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path')
+const { PDFDocument } = require('pdf-lib')
+const { _electron: electron } = require('/opt/homebrew/lib/node_modules/openclaw/node_modules/playwright-core')
+;(async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pdfdock-review20-'))
+ const env={...process.env,PDFKING_USE_BUILD:'1'}; delete env.ELECTRON_RUN_AS_NODE; delete env.VITE_DEV_SERVER_URL
+ let app
+ try {
+  app=await electron.launch({executablePath:require('electron'),args:['.',`--user-data-dir=${path.join(dir,'profile')}`],env})
+  const page=await app.firstWindow(); page.setDefaultTimeout(15000)
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  const b=name=>page.getByRole('button',{name,exact:true})
+  await b('Skip setup').click();await page.locator('.onboarding-panel').waitFor({state:'detached'})
+  const focus=()=>page.evaluate(()=>{const n=document.activeElement;return {tag:n.tagName,label:n.getAttribute('aria-label')||n.textContent?.trim().slice(0,80),class:n.className}})
+  const checkMove=async(label,loc)=>{for(const key of ['Tab','Shift+Tab']){await loc.focus();const before=await focus();await page.keyboard.press(key);const stays=await loc.evaluate(n=>n===document.activeElement);console.log(JSON.stringify({probe:label,key,stays,before,after:await focus()}));assert.equal(stays,false)}}
+  await checkMove('empty Home New document',b('New document'))
+  await checkMove('empty Home Add PDFs',b('Add PDFs'))
+  await b('New document').click();const dlg=page.getByRole('dialog');await dlg.waitFor()
+  const items=dlg.locator('button:not(:disabled),input:not(:disabled),[tabindex="0"]').filter({visible:true})
+  await items.first().focus();await page.keyboard.press('Shift+Tab');assert.equal(await items.last().evaluate(n=>n===document.activeElement),true)
+  await page.keyboard.press('Tab');assert.equal(await items.first().evaluate(n=>n===document.activeElement),true)
+  console.log('PASS new-document modal wraps both directions')
+  await b('Close new document dialog').click();await dlg.waitFor({state:'detached'})
+  await page.locator('.sidebar-settings').click();await page.waitForTimeout(500)
+  const settingButtons=page.locator('.settings-page button:visible:not(:disabled)');console.log('settings buttons',await settingButtons.count())
+  await checkMove('Settings first button',settingButtons.first())
+  await page.locator('.sidebar button[aria-label="Convert"]').click();await page.locator('.nav-subitem').filter({hasText:/^PDF to JPG$/}).click()
+  await checkMove('PDF to JPG browse',page.locator('.tool-studio-page button:visible:not(:disabled)').first())
+  await page.locator('.sidebar button').filter({hasText:/^Home$/}).click()
+  const pdf=await PDFDocument.create();pdf.addPage([300,400]);pdf.addPage([300,400]);const data=Array.from(await pdf.save())
+  await page.evaluate(async data=>{for(const name of ['review20-alpha.pdf','review20-beta.pdf'])await window.pdfKing.addRecentFile({name,data,pages:2,libraryId:name.replace(/\./g,'system')})},data)
+  await page.reload();await page.locator('.home-file-row').first().waitFor()
+  await checkMove('populated Home New document',b('New document'))
+  const row=page.locator('.home-file-row').first()
+  await row.click();await page.waitForFunction(()=>document.querySelector('.home-inspector canvas')?.width>0)
+  await page.keyboard.press('Tab');await page.waitForTimeout(400)
+  console.log(JSON.stringify({probe:'click row then Tab',selected:await row.getAttribute('aria-selected'),expanded:await page.locator('.home-inspector.is-expanded').count(),overlay:await page.locator('.home-preview-overlay').count(),focus:await focus()}))
+  assert.equal(await page.locator('.home-preview-overlay').count(),1,'Fresh selection must open preview with Tab');await page.keyboard.press('Escape');await page.locator('.home-preview-overlay').waitFor({state:'detached'});
+  await row.focus();await page.keyboard.press('Shift+Tab');console.log(JSON.stringify({probe:'row Shift+Tab',focus:await focus(),overlay:await page.locator('.home-preview-overlay').count()}))
+  // Force the existing effect to refresh without changing the selected record.
+  const search=page.getByRole('searchbox',{name:'Search recent PDFs'});await search.fill('review20');await row.focus();await page.keyboard.press('Tab');await page.locator('.home-preview-overlay').waitFor()
+  console.log('PASS refreshed row Tab opens full preview')
+  await page.keyboard.press('ArrowRight');await page.waitForTimeout(200);console.log('preview page after ArrowRight:',await page.locator('.home-preview-page-count').innerText())
+  await page.keyboard.press('Escape');await page.locator('.home-preview-overlay').waitFor({state:'detached'});console.log('PASS Escape closes full preview')
+  const remove=row.getByRole('button');await remove.focus();await page.keyboard.press('Tab');await page.waitForTimeout(400)
+  console.log(JSON.stringify({probe:'Remove row action Tab',overlay:await page.locator('.home-preview-overlay').count(),focus:await focus()}))
+  assert.equal(await page.locator('.home-preview-overlay').count(),0,'Remove-button Tab must not open preview');
+  if(await page.locator('.home-preview-overlay').count()){await page.keyboard.press('Escape');await page.locator('.home-preview-overlay').waitFor({state:'detached'})}
+  await remove.click();const confirm=page.getByRole('dialog',{name:'Remove from library?',exact:true});await confirm.waitFor()
+  const ci=confirm.locator('button:not(:disabled)');await ci.last().focus();await page.keyboard.press('Tab');assert.equal(await ci.first().evaluate(n=>n===document.activeElement),true)
+  await page.keyboard.press('Shift+Tab');assert.equal(await ci.last().evaluate(n=>n===document.activeElement),true)
+  await page.keyboard.press('Escape');await confirm.waitFor({state:'detached'});assert.equal(await page.locator('.home-file-row').count(),2)
+  console.log('PASS remove modal wraps both directions; Escape preserves records')
+  console.log('renderer errors:',JSON.stringify(errors));assert.deepEqual(errors,[])
+ }finally{if(app){await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close().catch(()=>{})}await fs.rm(dir,{recursive:true,force:true});console.log('CLEANUP native app closed; unique temporary profile removed')}
+})().catch(e=>{console.error(e);process.exitCode=1})

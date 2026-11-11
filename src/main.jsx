@@ -1,6 +1,7 @@
 import { PasswordDialog } from './editor/PasswordDialog'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
+import { tabbable } from 'tabbable'
 import '@fontsource/outfit/latin-400.css'
 import '@fontsource/outfit/latin-500.css'
 import '@fontsource/outfit/latin-600.css'
@@ -848,9 +849,11 @@ function App() {
 
   useEffect(() => {
     const topDialog = () => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter((el) => el.getClientRects().length).at(-1)
-    const focusables = () => [...(topDialog()?.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]') || [])].filter((el) => el.getClientRects().length)
+    const focusables = () => { const dialog = topDialog(); return dialog ? tabbable(dialog) : [] }
     const captureReturnFocus = (event) => {
-      if (!(event.target instanceof HTMLElement) || topDialog()?.contains(event.target)) return
+      const menu = event.target?.closest?.('[data-select-trigger]')
+      const trigger = menu && document.getElementById(menu.dataset.selectTrigger)
+      if (!(event.target instanceof HTMLElement) || topDialog()?.contains(event.target) || (trigger && topDialog()?.contains(trigger))) return
       dialogReturnFocusRef.current = event.target
     }
     document.addEventListener('focusin', captureReturnFocus, true)
@@ -872,6 +875,11 @@ function App() {
     syncDialogFocus()
     const trap = (event) => {
       if (event.key !== 'Tab') return
+      // A select popup belongs to its trigger's dialog even though it is
+      // portaled to the body. Let the select move focus relative to that trigger.
+      const menu = event.target?.closest?.('[data-select-trigger]')
+      const trigger = menu && document.getElementById(menu.dataset.selectTrigger)
+      if (trigger && topDialog()?.contains(trigger)) return
       const items = focusables()
       if (!items.length) return
       const firstItem = items[0], lastItem = items[items.length - 1]
@@ -995,7 +1003,7 @@ function App() {
           if (action === 'focus-editor-search') document.querySelector('.pdf-editor-menu-search input, .pdf-editor-workspace input[aria-label*="Search"]')?.focus()
           if (action.startsWith('editor-')) window.dispatchEvent(new CustomEvent('pdfking:editor-shortcut', { detail: { action } }))
           if (action === 'save-export' && currentView.type === 'tool' && !isFullPdfEditor) {
-            const saveButton = document.querySelector('.editor-save-button:not(:disabled), .editor-apply-inline:not(:disabled), .output-row .browse-button:not(:disabled)')
+            const saveButton = document.querySelector('.output-save-controls button[type="submit"]:not(:disabled), .editor-save-button:not(:disabled), .editor-apply-inline:not(:disabled)')
             saveButton?.click()
           }
           break
@@ -1013,13 +1021,6 @@ function App() {
         if (currentView.type === 'home') {
           const sidebar = document.querySelector('.sidebar')
           if (sidebar) sidebar.focus()
-        }
-      }
-      if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault()
-        if (currentView.type === 'home') {
-          const firstFile = document.querySelector('.home-file-row')
-          if (firstFile) firstFile.focus()
         }
       }
     }

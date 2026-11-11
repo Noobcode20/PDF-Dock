@@ -1,3 +1,4 @@
+import { FontSizeInput } from '../components/FontSizeInput'
 import { RichTextInput } from '../editor/RichTextInput'
 import { appendTextStyleRange, textStyleAt } from '../editor/textStyles'
 import { captureRevision, assertRevision, sessionAfterWrite } from '../editor/revisionGuard'
@@ -3723,7 +3724,7 @@ function PdfViewerPage({ selectedAnnotation,onAnnotationSelect,onAnnotationChang
     {activeTextEdit && <>
       <div className="pdf-text-format-ribbon" style={{ left: `${activeInputLayout.visualLeft * 100}%`, top: `${Math.max(6, activeInputLayout.visualTop * pageHeight - 46)}px` }} aria-label="Text formatting controls">
         <ThemedSelect ariaLabel="Font family" value={textStyle?.localFontId ? `local:${textStyle.localFontId}` : textStyle?.fontFamily || 'Helvetica'} onChange={event => onSelectTextFont?.(event.target.value)} options={[...(!PDF_TEXT_FONTS.includes(textStyle?.fontFamily) && !textStyle?.localFontId ? [{ value: textStyle.fontFamily, label: textStyle.fontFamily }] : []), ...PDF_TEXT_FONTS.map(font => ({ value: font, label: font })), ...localFonts.map(font => ({ value: `local:${font.id}`, label: `${font.name} · local` }))]} />
-        <ThemedSelect ariaLabel="Font size" value={textStyle?.fontSize || 14} onChange={event => onTextStyleActivate?.({...textStyle,fontSize:Number(event.target.value)})} options={[...new Set([8,10,12,14,16,18,24,32,48,textStyle?.fontSize || 14])].sort((a,b)=>a-b).map(size => ({ value: size, label: `${size} pt` }))} />
+        <FontSizeInput value={textStyle?.fontSize || 14} onChange={fontSize => onTextStyleActivate?.({ ...textStyle, fontSize })} />
         <span className="pdf-text-format-divider" />
         {['left','center','right'].map(alignment => <button key={alignment} type="button" className={`pdf-text-align-button align-${alignment} ${(activeTextEdit.alignment || 'left') === alignment ? 'active' : ''}`} aria-label={`${alignment} align`} aria-pressed={(activeTextEdit.alignment || 'left') === alignment} onMouseDown={event=>event.preventDefault()} onClick={()=>setActiveTextEdit(current=>current?{...current,alignment}:current)} />)}
         <button type="button" className={Boolean(textStyle?.bold) ? 'active' : ''} aria-label="Bold" aria-pressed={Boolean(textStyle?.bold)} onMouseDown={event=>event.preventDefault()} onClick={()=>onTextStyleActivate?.({...textStyle,bold:!textStyle?.bold})}><b>B</b></button>
