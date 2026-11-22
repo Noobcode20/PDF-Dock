@@ -1,6 +1,7 @@
 const { atomicWrite } = require('./atomicWrite.cjs')
 const { convertType1Fonts } = require('./fontCompression.cjs')
 const { isAppRendererURL } = require('./rendererOrigin.cjs')
+const { isPdfLaunchPath } = require('./launchFilePaths.cjs')
 const { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, Menu } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { createUpdateController } = require('./updateController.cjs')
@@ -194,19 +195,18 @@ const tabDrags = new Map()
 let pendingPdfPaths = []
 let mainWindow = null
 let rendererReady = false
-function queuePdfPath(value) {
-  const filePath = typeof value === 'string' && path.isAbsolute(value) && /\.pdf$/i.test(value) ? value : null
-  if (!filePath) return
+function queuePdfPath(filePath) {
+  if (!isPdfLaunchPath(filePath)) return
   if (mainWindow && !mainWindow.isDestroyed() && rendererReady && !mainWindow.webContents.isLoading()) mainWindow.webContents.send('pdfking:open-file', filePath)
   else pendingPdfPaths.push(filePath)
 }
-const initialPdfPaths = process.argv.slice(app.isPackaged ? 1 : 2).filter((value) => /^\//.test(value) && /\.pdf$/i.test(value))
+const initialPdfPaths = process.argv.slice(app.isPackaged ? 1 : 2).filter((value) => isPdfLaunchPath(value))
 pendingPdfPaths.push(...initialPdfPaths)
 const hasSingleInstanceLock = isCliRun || app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
 else {
   app.on('second-instance', (_event, argv) => {
-    const filePath = argv.find((value) => /^\//.test(value) && /\.pdf$/i.test(value))
+    const filePath = argv.find((value) => isPdfLaunchPath(value))
     if (filePath) queuePdfPath(filePath)
     if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus() }
   })

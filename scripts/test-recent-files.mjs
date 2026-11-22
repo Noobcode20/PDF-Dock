@@ -30,6 +30,8 @@ vm.runInNewContext(source, {
       ? electron
       : name === "./atomicWrite.cjs"
         ? require("../electron/atomicWrite.cjs")
+        : name === "./launchFilePaths.cjs"
+          ? require("../electron/launchFilePaths.cjs")
         : name === "./rendererOrigin.cjs"
           ? require("../electron/rendererOrigin.cjs")
         : name === "./fontCompression.cjs"
